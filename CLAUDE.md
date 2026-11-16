@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 ## Project
 
-ZangYar (زنگ‌یار) is a Persian, RTL, multi-tenant school-management and parent-notification SaaS for schools in Iran. Build it as a modular monolith: one Next.js application containing the UI and server-side domain logic. The initial task is foundation/bootstrap work; do not implement school-management workflows until the foundation is reviewed.
+ZangYar (زنگ‌یار) is a Persian, RTL, multi-tenant school-management and parent-notification SaaS for schools in Iran. Build it as a modular monolith: one Next.js application containing the UI and server-side domain logic. Product and domain design are approved in `docs/`; Phase 2 establishes the foundation before domain schema and business workflows.
 
 ## Technology
 
@@ -40,25 +40,24 @@ Resolve the active school from the authenticated user's verified membership; nev
 
 ## Development commands
 
-The repository currently contains no application files or package scripts. Once the foundation is bootstrapped, confirm the exact scripts in `package.json` and keep this section synchronized. The intended commands are:
+The current foundation scripts are defined in `package.json`. Use Corepack when pnpm is not directly available on PATH:
 
 ```bash
-pnpm install
-pnpm dev
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm test -- <test-file-or-pattern>
-pnpm test:e2e
-pnpm build
+corepack pnpm install
+corepack pnpm dev
+corepack pnpm lint
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm test -- <test-file-or-pattern>
+corepack pnpm build
+corepack pnpm db:check
 
 docker compose up -d postgres
-pnpm db:generate
-pnpm db:migrate
+docker compose ps
 ```
 
-Do not document a command as verified until it exists in the project configuration and has been run successfully. Report unavailable or failing checks plainly.
+The current foundation has no domain migrations or end-to-end test suite yet, so do not document migration or `test:e2e` commands as available. Do not document a command as verified until it exists in the project configuration and has been run successfully. Report unavailable or failing checks plainly.
 
 ## Documentation expectations
 
-Update the relevant files in `docs/` when architecture, tenant isolation, data-model, product scope, roadmap, or significant technical decisions change. Keep the root guidance concise and put detailed workflows in project-specific Claude skills. During bootstrap, create the requested documentation and skills; stop before implementing MVP entities or workflows.
+Update the relevant files in `docs/` when architecture, tenant isolation, data-model, product scope, roadmap, or significant technical decisions change. Keep the root guidance concise and put detailed workflows in project-specific Claude skills. Phase 2 creates only the working foundation; do not implement MVP entities, domain migrations, or business workflows until the foundation is reviewed.

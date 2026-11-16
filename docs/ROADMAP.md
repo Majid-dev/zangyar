@@ -1,10 +1,10 @@
 # ZangYar Roadmap
 
-This roadmap separates product/design decisions from implementation work. The current phase is documentation and domain design; no application workflows or migrations should be implemented until the model and unresolved decisions are reviewed.
+This roadmap separates product/design decisions from implementation work. Product and domain design is approved; Phase 2 establishes the application foundation before domain schema and business workflows are implemented.
 
 ## Phase 1 — Product and domain design
 
-**Status:** In progress
+**Status:** Complete
 
 - Review product scope and personas.
 - Define school tenancy and membership model.
@@ -18,7 +18,7 @@ This roadmap separates product/design decisions from implementation work. The cu
 
 ## Phase 2 — Foundation and project bootstrap
 
-**Status:** Planned
+**Status:** In progress
 
 - Initialize the Next.js App Router project with strict TypeScript.
 - Configure Tailwind, RTL layout, Vazirmatn, and ZangYar visual tokens.
