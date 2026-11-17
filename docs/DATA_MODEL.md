@@ -241,6 +241,7 @@ audit_logs(actor_user_id, occurred_at)
 - Subjects are optional for classroom-teacher assignments.
 - Operational records use archive/status transitions instead of destructive deletion in the MVP.
 - Formal guardian-consent workflows are deferred; SMS eligibility remains explicit on the student-guardian relationship.
+- The initial schema uses effective-dated enrollment columns and application validation; PostgreSQL range exclusion for overlapping enrollments will be added when the enrollment service is implemented and tested.
 
 ## Deferred design questions
 
