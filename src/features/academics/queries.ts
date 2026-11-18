@@ -1,8 +1,8 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
-import { requireSchoolAccess } from "@/lib/auth/authorization";
+import { requireSchoolAccess, requireSchoolRole, type ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getDb } from "@/lib/db";
 import { academicYears, classTeachers, classrooms, grades, schoolSettings, subjects, users, schoolMemberships } from "@/lib/db/schema";
 
@@ -14,29 +14,50 @@ export async function getSchoolConfiguration(options: { headers: Headers; school
 
 export async function listAcademicYears(options: { headers: Headers; schoolId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
+  return listAcademicYearsForContext(context);
+}
+
+export async function listAcademicYearsForContext(context: ActiveSchoolMembership) {
   return getDb().select().from(academicYears).where(eq(academicYears.schoolId, context.schoolId)).orderBy(asc(academicYears.startDate));
 }
 
 export async function listGrades(options: { headers: Headers; schoolId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
-  return getDb().select().from(grades).where(eq(grades.schoolId, context.schoolId)).orderBy(asc(grades.sortOrder), asc(grades.name));
+  return listGradesForContext(context);
+}
+
+export async function listGradesForContext(context: ActiveSchoolMembership) {
+  return getDb().select().from(grades).where(and(eq(grades.schoolId, context.schoolId), eq(grades.status, "ACTIVE"))).orderBy(asc(grades.sortOrder), asc(grades.name));
 }
 
 export async function listSubjects(options: { headers: Headers; schoolId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
-  return getDb().select().from(subjects).where(eq(subjects.schoolId, context.schoolId)).orderBy(asc(subjects.name));
+  return listSubjectsForContext(context);
+}
+
+export async function listSubjectsForContext(context: ActiveSchoolMembership) {
+  return getDb().select().from(subjects).where(and(eq(subjects.schoolId, context.schoolId), eq(subjects.status, "ACTIVE"))).orderBy(asc(subjects.name));
 }
 
 export async function listClassrooms(options: { headers: Headers; schoolId?: string; academicYearId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
+  return listClassroomsForContext(context, options.academicYearId);
+}
+
+export async function listClassroomsForContext(context: ActiveSchoolMembership, academicYearId?: string) {
   return getDb().select().from(classrooms).where(and(
     eq(classrooms.schoolId, context.schoolId),
-    options.academicYearId ? eq(classrooms.academicYearId, options.academicYearId) : undefined,
+    eq(classrooms.status, "ACTIVE"),
+    academicYearId ? eq(classrooms.academicYearId, academicYearId) : undefined,
   )).orderBy(asc(classrooms.name));
 }
 
 export async function listClassroomTeachers(options: { headers: Headers; schoolId?: string; classroomId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
+  return listClassroomTeachersForContext(context, options.classroomId);
+}
+
+export async function listClassroomTeachersForContext(context: ActiveSchoolMembership, classroomId?: string) {
   return getDb().select({
     assignment: classTeachers,
     teacher: users,
@@ -45,10 +66,46 @@ export async function listClassroomTeachers(options: { headers: Headers; schoolI
     .innerJoin(schoolMemberships, and(
       eq(schoolMemberships.id, classTeachers.teacherMembershipId),
       eq(schoolMemberships.schoolId, context.schoolId),
+      eq(schoolMemberships.status, "ACTIVE"),
     ))
     .innerJoin(users, eq(users.id, schoolMemberships.userId))
     .where(and(
       eq(classTeachers.schoolId, context.schoolId),
-      options.classroomId ? eq(classTeachers.classroomId, options.classroomId) : undefined,
+      eq(classTeachers.status, "ACTIVE"),
+      classroomId ? eq(classTeachers.classroomId, classroomId) : undefined,
     ));
+}
+
+export async function listTeacherMemberships(options: { headers: Headers; schoolId?: string }) {
+  const context = await requireSchoolRole({ headers: options.headers, schoolId: options.schoolId, roles: ["SCHOOL_ADMIN"] });
+  return listTeacherMembershipsForContext(context);
+}
+
+export async function listTeacherMembershipsForContext(context: ActiveSchoolMembership) {
+  return getDb().select({
+    id: schoolMemberships.id,
+    userId: schoolMemberships.userId,
+    userName: users.name,
+    userEmail: users.email,
+  }).from(schoolMemberships)
+    .innerJoin(users, eq(users.id, schoolMemberships.userId))
+    .where(and(
+      eq(schoolMemberships.schoolId, context.schoolId),
+      eq(schoolMemberships.role, "TEACHER"),
+      eq(schoolMemberships.status, "ACTIVE"),
+    )).orderBy(asc(users.name));
+}
+
+export async function listClassroomsWithTeachersForContext(context: ActiveSchoolMembership) {
+  const [classroomRows, assignmentRows] = await Promise.all([
+    listClassroomsForContext(context),
+    listClassroomTeachersForContext(context),
+  ]);
+  const assignmentsByClassroom = new Map<string, typeof assignmentRows>();
+  for (const row of assignmentRows) {
+    const existing = assignmentsByClassroom.get(row.assignment.classroomId) ?? [];
+    existing.push(row);
+    assignmentsByClassroom.set(row.assignment.classroomId, existing);
+  }
+  return classroomRows.map((classroom) => ({ classroom, assignments: assignmentsByClassroom.get(classroom.id) ?? [] }));
 }

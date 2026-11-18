@@ -88,6 +88,12 @@ describe.skipIf(!canRun)("persisted Phase 4 school and academic management", () 
     expect(assignment.schoolId).toBe(schoolA);
   });
 
+  it("rejects duplicate subjectless assignments and out-of-window dates", async () => {
+    await expect(assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, startDate: "2026-09-23", isPrimary: false } })).resolves.toBeDefined();
+    await expect(assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, startDate: "2026-09-24", isPrimary: false } })).rejects.toThrow("already assigned");
+    await expect(assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, startDate: "2020-01-01", isPrimary: false } })).rejects.toThrow("must fit within");
+  });
+
   it("rejects cross-tenant classroom creation", async () => {
     await expect(createClassroom({ headers: admin.headers, input: { academicYearId: yearB, gradeId: gradeB, code: "B", name: "Cross tenant" } })).rejects.toThrow();
     const created = await getDb().select({ id: classrooms.id }).from(classrooms).where(eq(classrooms.academicYearId, yearB));
