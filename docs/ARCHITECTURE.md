@@ -130,6 +130,19 @@ Initial reports should use tenant-scoped database queries over attendance sessio
 | Overloaded domain modules | Feature-oriented organization and direct, concrete services. |
 | Unsafe platform queries | Separate Platform Admin authorization path. |
 
+## Phase 3 implementation status
+
+The initial Phase 3 authorization boundary is now in place in `src/lib/auth/authorization.ts` and `src/lib/auth/authorization-core.ts`:
+
+- Authentication is resolved from the Better Auth session before membership lookup.
+- Active school membership is loaded server-side and filtered by active status.
+- A requested `schoolId` is only a selector against verified memberships, never authorization evidence.
+- Ambiguous membership context, missing membership, unauthenticated access, wrong role, and missing Platform Admin access are rejected.
+- Membership mutations use Zod validation, tenant-scoped updates, transactions, and audit events in `src/features/memberships/services.ts`.
+- Pure active-school selection tests cover missing, ambiguous, matching, and cross-tenant selectors.
+
+Remaining Phase 3 work: add domain-specific resource-ownership cases as Phase 4 classroom resources are implemented; execute the migration test against a clean database; add membership-management HTTP route boundaries if exposed beyond Server Actions.
+
 ## Implementation sequence
 
 1. Finalize remaining enrollment, notification, and date decisions; role cardinality and mobile uniqueness are decided.

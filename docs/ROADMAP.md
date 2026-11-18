@@ -18,7 +18,7 @@ This roadmap separates product/design decisions from implementation work. Produc
 
 ## Phase 2 — Foundation and project bootstrap
 
-**Status:** In progress
+**Status:** Complete
 
 - Initialize the Next.js App Router project with strict TypeScript.
 - Configure Tailwind, RTL layout, Vazirmatn, and ZangYar visual tokens.
@@ -26,12 +26,13 @@ This roadmap separates product/design decisions from implementation work. Produc
 - Configure Drizzle and environment-variable conventions.
 - Establish Better Auth integration boundary without implementing domain workflows.
 - Add health check and baseline test/type/lint/build commands.
+- Add initial global identity/session schema and the Phase 3 server authorization boundary.
 
-**Exit criteria:** Application starts, PostgreSQL starts, configuration is validated, and baseline checks pass.
+**Exit criteria:** Application starts, PostgreSQL starts, configuration is validated, and baseline checks pass. Verified on 2026-11-18: PostgreSQL healthy; `corepack pnpm lint`, `corepack pnpm typecheck`, `corepack pnpm test`, `corepack pnpm db:check`, and `corepack pnpm build` pass.
 
 ## Phase 3 — Authentication, memberships, and tenant authorization
 
-**Status:** Planned
+**Status:** In progress
 
 - Implement global user/session integration.
 - Implement school membership and role checks.
@@ -39,6 +40,11 @@ This roadmap separates product/design decisions from implementation work. Produc
 - Add server-side authorization helpers.
 - Add negative cross-tenant access tests.
 - Add audit events for membership and school access changes.
+- Add membership queries and Server Actions with Zod validation.
+
+**Completed in this phase slice:** Better Auth Drizzle adapter wiring; tenant-scoped membership listing, creation, and status changes; membership audit events; self-status-change protection; authorization unit tests.
+
+**Remaining:** run the opt-in persisted Better Auth integration suite with `RUN_DB_INTEGRATION_TESTS=1`; add domain-specific resource-ownership cases as Phase 4 classroom resources are implemented; execute the migration test against a clean database.
 
 **Exit criteria:** Protected operations reject unauthenticated users, invalid memberships, wrong roles, wrong tenants, and unauthorized resource access.
 
