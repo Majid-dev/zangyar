@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "graphify": {
+      "source": "skeletorflet/opencode-supreme-setup",
+      "commit": "f932a5312f15194cfe6f97aa6a39b8ec7f842c8d",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/graphify/SKILL.md",
+      "computedHash": "04f8fc343ac88b9ca05ed6d659b012b1ec62f0e9b3a48d59cff6cc38ba39a211"
+    }
+  }
+}
