@@ -141,7 +141,13 @@ The initial Phase 3 authorization boundary is now in place in `src/lib/auth/auth
 - Membership mutations use Zod validation, tenant-scoped updates, transactions, and audit events in `src/features/memberships/services.ts`.
 - Pure active-school selection tests cover missing, ambiguous, matching, and cross-tenant selectors.
 
-Remaining Phase 3 work: add domain-specific resource-ownership cases as Phase 4 classroom resources are implemented; execute the migration test against a clean database; add membership-management HTTP route boundaries if exposed beyond Server Actions.
+Remaining Phase 3 work: add domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions.
+
+## Phase 4 implementation status
+
+Phase 4 school and academic management is complete. School Admin operations are authenticated, tenant-scoped, operational-school restricted, and audited. Academic years use guarded lifecycle transitions. Grades, subjects, and classrooms enforce same-school relationships and reject archived catalog records. Teacher assignments require active same-tenant teacher memberships, valid academic-year date windows, active subjects, and duplicate protection. Academic management pages expose school settings, academic years, catalogs, classrooms, and teacher assignment forms. Classroom assignment reads filter inactive records and batch tenant-scoped data loading.
+
+Verification: unit/integration tests, `corepack pnpm typecheck`, `corepack pnpm lint`, `corepack pnpm db:check`, `corepack pnpm build`, `corepack pnpm db:test-clean`, and `corepack pnpm test:integration:phase4` pass. The current persisted Phase 4 suite passes 40 tests in an ephemeral database.
 
 ## Implementation sequence
 

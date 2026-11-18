@@ -50,7 +50,7 @@ This roadmap separates product/design decisions from implementation work. Produc
 
 ## Phase 4 — Schools and academic management
 
-**Status:** In progress
+**Status:** Complete
 
 - Implement school configuration and status.
 - Implement academic years and transitions.
@@ -59,11 +59,9 @@ This roadmap separates product/design decisions from implementation work. Produc
 - Add same-tenant composite constraints and indexes.
 - Add school/academic management Zod schemas, queries, Server Actions, audit events, and authorization tests.
 
-**Completed in this phase slice:** School configuration/status operations; academic-year creation and guarded transitions; grade and subject catalog operations; classroom creation; active teacher assignment; tenant-scoped queries; audit coverage for school, year, classroom, and assignment changes.
+**Completed:** School configuration/status operations; guarded academic-year lifecycle; active grade/subject catalog; classroom creation; active same-tenant teacher assignment; assignment date-window and duplicate protection; tenant-scoped queries; audit coverage; admin UI routes/forms; inactive/archived filtering; batched classroom-assignment loading; persisted integration coverage.
 
-**Remaining:** add teacher-assignment management UI; add persisted tests for duplicate assignment rejection and archived catalog rejection.
-
-Completed: UI routes/forms for school settings, academic years, catalog, and classrooms; lifecycle tests for status transitions, valid date ranges, assignment windows, and impossible dates.
+**Exit criteria verification (2026-11-18):** A School Admin can configure an academic year and assign teachers to classrooms without cross-tenant relationships. Verified by passing unit tests, typecheck, lint, Drizzle check, production build, clean migration test, and isolated persisted Phase 4 integration tests (40 tests passed).
 
 Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepack pnpm test:integration:phase4`.
 
