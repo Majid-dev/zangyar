@@ -46,6 +46,58 @@ body {
 }
 
 button,
-a {
+a,
+input,
+select,
+textarea {
   -webkit-tap-highlight-color: transparent;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  color: var(--foreground);
+  padding: 0.75rem 0.9rem;
+  font: inherit;
+}
+
+textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.field {
+  display: grid;
+  gap: 0.5rem;
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.button-primary,
+.button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.button-primary {
+  border: 0;
+  background: var(--primary);
+  color: white;
+}
+
+.button-secondary {
+  border: 1px solid color-mix(in srgb, var(--secondary) 30%, white);
+  background: color-mix(in srgb, var(--secondary) 10%, white);
+  color: var(--secondary);
 }
