@@ -1,9 +1,11 @@
-import { headers } from "next/headers";
-
 import { createAcademicYearAction, transitionAcademicYearAction } from "@/features/academics/actions";
 import { listAcademicYears } from "@/features/academics/queries";
 
+import { requirePageAccess } from "../_components/route-access";
+
 export default async function AcademicYearsPage() {
-  const years = await listAcademicYears({ headers: await headers() });
+  const access = await requirePageAccess(["SCHOOL_ADMIN"]);
+  if (access.blocked) return access.blocked;
+  const years = await listAcademicYears({ headers: access.headers });
   return <main className="mx-auto max-w-5xl p-6"><h1 className="text-3xl font-black text-primary">سال‌های تحصیلی</h1><form action={createAcademicYearAction} className="mt-6 grid gap-3 rounded-3xl bg-surface p-6 shadow-sm ring-1 ring-border sm:grid-cols-4"><input name="code" placeholder="کد" required /><input name="name" placeholder="نام سال" required /><input name="startDate" type="date" required /><input name="endDate" type="date" required /><button className="button-primary sm:col-span-4" type="submit">ایجاد سال تحصیلی</button></form><div className="mt-6 space-y-3">{years.map((year) => <article key={year.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-surface p-5 ring-1 ring-border"><div><h2 className="font-black text-primary">{year.name}</h2><p className="mt-1 text-sm text-muted">{year.code} · {year.startDate} تا {year.endDate} · {year.status}</p></div><div className="flex gap-2">{year.status === "DRAFT" && <form action={transitionAcademicYearAction}><input type="hidden" name="academicYearId" value={year.id} /><input type="hidden" name="status" value="ACTIVE" /><button className="button-secondary" type="submit">فعال‌سازی</button></form>}{year.status === "ACTIVE" && <form action={transitionAcademicYearAction}><input type="hidden" name="academicYearId" value={year.id} /><input type="hidden" name="status" value="CLOSED" /><button className="button-secondary" type="submit">بستن سال</button></form>}</div></article>)}</div></main>;
 }
