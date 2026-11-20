@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "db:check": "drizzle-kit check",
     "db:test-clean": "node scripts/test-clean-migration.mjs",
-    "test:integration:phase4": "node scripts/test-phase4-integration.mjs"
+    "test:integration:phase4": "node scripts/test-phase4-integration.mjs",
+    "test:integration:phase5": "node scripts/test-phase5-integration.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.25",
@@ -26,6 +27,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.5",
     "@tailwindcss/turbopack": "4.3.3",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",

@@ -110,6 +110,22 @@ This file records product and architecture decisions for the initial MVP. Decisi
 
 **Decision:** User-facing forms may accept Persian-calendar dates, which are converted to Gregorian dates before storage.
 
+## ADR-013: Tenant-safe student roster ownership
+
+**Status:** Accepted
+
+**Decision:** School Admins may manage all student, guardian, relationship, and enrollment records within their verified school. Teachers have read-only access through active, date-effective classroom assignments and receive projections without guardian mobile or national ID.
+
+**Rationale:** Student records are school-owned, while classroom assignment is the teacher resource boundary. A student ID alone must never bypass assignment checks.
+
+## ADR-014: Enforce non-overlapping enrollment ranges
+
+**Status:** Accepted
+
+**Decision:** Enrollment ranges use `[startDate, endDate)` semantics and are protected by a PostgreSQL exclusion constraint in addition to application validation. Relationship rows and enrollment history are retained through status/close transitions.
+
+**Rationale:** Application checks provide useful domain errors, while the database constraint prevents concurrent classroom transfers from creating overlapping history.
+
 ## ADR-012: Preserve historical records through status and archive transitions
 
 **Status:** Accepted

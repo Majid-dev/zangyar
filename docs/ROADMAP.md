@@ -69,7 +69,7 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 
 ## Phase 5 — Students, guardians, and enrollment
 
-**Status:** Planned
+**Status:** Complete
 
 - Implement school-local student records.
 - Implement guardian contacts and student-guardian relationships.
@@ -79,7 +79,7 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 - Add effective-dated enrollment history and non-overlapping classroom transfer behavior.
 - Add lifecycle and historical-record behavior.
 
-**Exit criteria:** Students can be enrolled with multiple guardians and all relationships are tenant-safe and auditable.
+**Exit criteria:** Students can be enrolled with multiple guardians and all relationships are tenant-safe and auditable. Verified by passing unit, authorization, and persisted integration tests (52 tests passed), and visual verification of tenant-scoped roster and student list.
 
 ## Phase 6 — Daily attendance
 

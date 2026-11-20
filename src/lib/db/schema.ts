@@ -28,6 +28,7 @@ export const membershipRole = pgEnum("membership_role", ["SCHOOL_ADMIN", "TEACHE
 export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED"]);
 export const academicYearStatus = pgEnum("academic_year_status", ["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]);
 export const recordStatus = pgEnum("record_status", ["ACTIVE", "ARCHIVED"]);
+export const studentStatus = pgEnum("student_status", ["ACTIVE", "WITHDRAWN", "GRADUATED", "ARCHIVED"]);
 export const attendanceSessionKind = pgEnum("attendance_session_kind", ["DAILY", "LESSON"]);
 export const attendanceSessionStatus = pgEnum("attendance_session_status", ["OPEN", "CLOSED"]);
 export const attendanceStatus = pgEnum("attendance_status", ["PRESENT", "ABSENT", "LATE", "EXCUSED"]);
@@ -245,7 +246,7 @@ export const students = pgTable("students", {
   lastName: varchar("last_name", { length: 100 }).notNull(),
   nationalId: varchar("national_id", { length: 32 }),
   birthDate: date("birth_date", { mode: "string" }),
-  status: recordStatus("status").default("ACTIVE").notNull(),
+  status: studentStatus("status").default("ACTIVE").notNull(),
   ...timestamps,
 }, (table) => [
   unique("students_school_admission_unique").on(table.schoolId, table.admissionNumber),
@@ -323,6 +324,7 @@ export const enrollments = pgTable("enrollments", {
   check("enrollments_date_order_check", sql`${table.endDate} is null or ${table.startDate} < ${table.endDate}`),
   index("enrollments_school_year_classroom_idx").on(table.schoolId, table.academicYearId, table.classroomId),
   index("enrollments_school_student_year_idx").on(table.schoolId, table.studentId, table.academicYearId, table.startDate),
+  index("enrollments_school_student_effective_idx").on(table.schoolId, table.studentId, table.startDate, table.endDate),
 ]);
 
 export const attendanceSessions = pgTable("attendance_sessions", {

@@ -61,3 +61,113 @@ The current foundation has no domain migrations or end-to-end test suite yet, so
 ## Documentation expectations
 
 Update the relevant files in `docs/` when architecture, tenant isolation, data-model, product scope, roadmap, or significant technical decisions change. Keep the root guidance concise and put detailed workflows in project-specific Claude skills. Phase 2 creates only the working foundation; do not implement MVP entities, domain migrations, or business workflows until the foundation is reviewed.
+
+# ZangYar — UI/UX & Visual Design Principles
+
+## Design Philosophy
+
+Design ZangYar as a distinctive, premium, human-centered school platform.
+
+The interface must feel intentionally designed, not AI-generated, template-driven, or like a generic SaaS admin dashboard.
+
+The product should communicate:
+- Trust
+- Calmness
+- Clarity
+- Warmth
+- Professionalism
+- Human connection between school, teachers, and families
+
+## Visual Direction
+
+Use a combination of:
+- Editorial design principles
+- Modern education product aesthetics
+- Thoughtful typography
+- Asymmetric layouts where appropriate
+- Generous whitespace
+- Strong visual hierarchy
+- Subtle visual storytelling
+
+Persian must be treated as a first-class design language. Never treat RTL as an afterthought.
+
+## Avoid Generic AI UI Patterns
+
+Do not automatically:
+- Wrap every section in a card
+- Use card grids for every dashboard
+- Add decorative gradients
+- Add glassmorphism
+- Use excessive shadows
+- Use unnecessary borders and dividers
+- Add oversized rounded corners everywhere
+- Repeat identical layouts across all pages
+- Add decorative icons without functional meaning
+- Use charts without a meaningful purpose
+- Create excessive KPI cards
+- Use purple/blue gradients typical of AI-generated interfaces
+- Add emojis to professional UI elements
+
+Do not use a generic dashboard template as the foundation of the product.
+
+## Layout Principles
+
+- Every page must have a layout appropriate to its purpose.
+- Prioritize the user's primary task over decoration.
+- Use whitespace intentionally.
+- Use visual hierarchy instead of unnecessary containers.
+- Tables and data-heavy interfaces must remain readable.
+- Teacher workflows must be optimized for mobile and speed.
+- Admin workflows must be optimized for clarity and efficient data management.
+- Responsive behavior must be intentionally designed for desktop, tablet, and mobile.
+
+## Design System
+
+Use the project's design tokens for:
+- Colors
+- Typography
+- Spacing
+- Radius
+- Shadows
+- Borders
+- States
+
+Do not introduce random colors or inconsistent spacing.
+
+Primary palette:
+- Navy: #173B57
+- Teal: #159A91
+- Amber: #F4A340
+- Paper: #F4F1E9
+- Sage: #E3EAE7
+- Charcoal: #282F36
+
+Use Vazirmatn as the primary Persian font.
+
+## Interaction Quality
+
+Every interaction must have:
+- Clear feedback
+- Loading states
+- Empty states
+- Error states
+- Success states
+- Disabled states when applicable
+
+Prefer meaningful micro-interactions over unnecessary animations.
+
+## Design Process
+
+Before implementing a new major page:
+
+1. Identify the user and their primary task.
+2. Identify the most important information on the page.
+3. Propose a distinctive layout.
+4. Avoid reusing the same page structure unnecessarily.
+5. Implement the page.
+6. Review the page visually in a real browser.
+7. Refine spacing, typography, hierarchy, and interaction.
+
+Do not consider a page complete merely because it compiles or passes tests.
+
+Visual quality and usability are part of completion criteria.

@@ -100,7 +100,7 @@ A separate processor claims pending outbox items, sends through an `SmsProvider`
 - Display dates using Persian-friendly formatting in the UI without changing stored instants.
 - Do not derive attendance day boundaries from the server's local timezone.
 
-User-facing forms may accept Persian-calendar dates and convert them to Gregorian dates at the application boundary. Enrollment transfers use effective date ranges: close the previous enrollment and create the next one without overlapping ranges for the same student and academic year.
+User-facing forms may accept Persian-calendar dates and convert them to Gregorian dates at the application boundary. Student, guardian, relationship, and enrollment mutations are owned by `src/features/students` and derive tenant identity from verified membership context. Teachers read students only through active, date-effective classroom assignments; teacher projections omit sensitive guardian contact data. Enrollment transfers use effective date ranges: close the previous enrollment and create the next one without overlapping ranges for the same student and academic year. PostgreSQL exclusion enforcement protects this invariant under concurrent writes.
 
 ## Authentication and roles
 

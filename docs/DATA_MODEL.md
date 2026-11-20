@@ -76,7 +76,7 @@ erDiagram
 
 | Entity | Ownership | Cardinality and lifecycle |
 |---|---|---|
-| `students` | School | School-local identity; active, withdrawn, graduated, or archived. |
+| `students` | School | School-local identity; active, withdrawn, graduated, or archived. Student lifecycle uses a dedicated status enum; historical rows are retained. |
 | `guardians` | School | Contact record; may link to many students in the same school. |
 | `student_guardians` | School | Many-to-many association with relationship and notification flags. |
 | `enrollments` | School, academic year, classroom | Associates a student with a class for an effective date range. Multiple sequential enrollments per student/year support classroom transfers; date ranges must not overlap. |
@@ -241,7 +241,10 @@ audit_logs(actor_user_id, occurred_at)
 - Subjects are optional for classroom-teacher assignments.
 - Operational records use archive/status transitions instead of destructive deletion in the MVP.
 - Formal guardian-consent workflows are deferred; SMS eligibility remains explicit on the student-guardian relationship.
-- The initial schema uses effective-dated enrollment columns and application validation; PostgreSQL range exclusion for overlapping enrollments will be added when the enrollment service is implemented and tested.
+- Student lifecycle uses `ACTIVE`, `WITHDRAWN`, `GRADUATED`, and `ARCHIVED`; student status transitions preserve references and close active enrollment when required.
+- Guardian mobile and student national ID are normalized at the application boundary before school-scoped uniqueness checks.
+- Student-guardian relationship rows are retained; new links require a relationship type, and SMS eligibility requires a valid normalized mobile.
+- PostgreSQL range exclusion enforces non-overlapping enrollment ranges; adjacent `[startDate, endDate)` transfers remain valid.
 
 ## Deferred design questions
 
