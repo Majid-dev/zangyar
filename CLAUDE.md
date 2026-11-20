@@ -58,6 +58,16 @@ docker compose ps
 
 The current foundation has no domain migrations or end-to-end test suite yet, so do not document migration or `test:e2e` commands as available. Do not document a command as verified until it exists in the project configuration and has been run successfully. Report unavailable or failing checks plainly.
 
+# Repository Exploration Rules
+
+- Never scan the entire repository unless explicitly requested.
+- Never read package-lock.json, yarn.lock, generated files,
+  binaries, build outputs, or dependency directories.
+- Start with targeted search.
+- Read only relevant sections of files.
+- Avoid recursively listing large directories.
+- Do not repeat file reads unless the file changed.
+
 ## Documentation expectations
 
 Update the relevant files in `docs/` when architecture, tenant isolation, data-model, product scope, roadmap, or significant technical decisions change. Keep the root guidance concise and put detailed workflows in project-specific Claude skills. Phase 2 creates only the working foundation; do not implement MVP entities, domain migrations, or business workflows until the foundation is reviewed.
