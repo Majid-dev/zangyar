@@ -3,8 +3,8 @@ import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
 import { createAcademicYearAction, transitionAcademicYearAction } from "@/features/academics/actions";
 import { listAcademicYearsForContext } from "@/features/academics/queries";
+import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
 import { Panel, SectionHeading } from "@/components/ui/panel";
@@ -44,18 +44,18 @@ export default async function AcademicYearsPage() {
                 </div>
                 <div className="flex gap-2">
                   {year.status === "DRAFT" ? (
-                    <form action={transitionAcademicYearAction}>
+                    <ActionForm action={transitionAcademicYearAction}>
                       <input type="hidden" name="academicYearId" value={year.id} />
                       <input type="hidden" name="status" value="ACTIVE" />
-                      <Button type="submit" size="sm" variant="secondary">فعال‌سازی</Button>
-                    </form>
+                      <SubmitButton size="sm" variant="secondary" pendingLabel="در حال فعال‌سازی…">فعال‌سازی</SubmitButton>
+                    </ActionForm>
                   ) : null}
                   {year.status === "ACTIVE" ? (
-                    <form action={transitionAcademicYearAction}>
+                    <ActionForm action={transitionAcademicYearAction}>
                       <input type="hidden" name="academicYearId" value={year.id} />
                       <input type="hidden" name="status" value="CLOSED" />
-                      <Button type="submit" size="sm" variant="ghost">بستن سال</Button>
-                    </form>
+                      <SubmitButton size="sm" variant="ghost" pendingLabel="در حال بستن…">بستن سال</SubmitButton>
+                    </ActionForm>
                   ) : null}
                 </div>
               </article>
@@ -64,14 +64,18 @@ export default async function AcademicYearsPage() {
         </Panel>
 
         <Panel className="order-1 self-start lg:order-2">
-          <SectionHeading title="سال تحصیلی جدید" description="تاریخ‌ها را به میلادی وارد کنید." />
-          <form action={createAcademicYearAction} className="mt-5 grid gap-4">
-            <Field label="کد"><Input name="code" placeholder="1405" required dir="ltr" className="text-start" /></Field>
-            <Field label="نام سال"><Input name="name" placeholder="سال تحصیلی ۱۴۰۵–۱۴۰۶" required /></Field>
-            <Field label="تاریخ شروع"><JalaliDatePicker name="startDate" required /></Field>
-            <Field label="تاریخ پایان"><JalaliDatePicker name="endDate" required /></Field>
-            <div><Button type="submit" className="w-full">ایجاد سال تحصیلی</Button></div>
-          </form>
+          <SectionHeading title="سال تحصیلی جدید" description="تاریخ‌ها با تقویم شمسی انتخاب می‌شوند." />
+          <ActionForm action={createAcademicYearAction} className="mt-5 grid gap-4">
+            <Field label="کد" name="code"><Input name="code" placeholder="1405" required dir="ltr" className="text-start" /></Field>
+            <Field label="نام سال" name="name"><Input name="name" placeholder="سال تحصیلی ۱۴۰۵–۱۴۰۶" required /></Field>
+            <Field label="تاریخ شروع" name="startDate"><JalaliDatePicker name="startDate" required /></Field>
+            <Field label="تاریخ پایان" name="endDate"><JalaliDatePicker name="endDate" required /></Field>
+            <div>
+              <SubmitButton className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-4 text-sm font-bold text-white shadow-[0_8px_18px_rgba(23,59,87,0.16)] transition-colors hover:bg-primary/90" pendingLabel="در حال ایجاد…">
+                ایجاد سال تحصیلی
+              </SubmitButton>
+            </div>
+          </ActionForm>
         </Panel>
       </div>
     </AppPage>

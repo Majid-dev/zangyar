@@ -1,7 +1,23 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
+import { executeAction } from "@/lib/actions/execute";
+import type { ActionResult } from "@/lib/actions/result";
+
+import { formDataToObject, nullableString, optionalNumber } from "./form-data";
+import {
+  archiveCatalogItemSchema,
+  assignTeacherSchema,
+  createAcademicYearSchema,
+  createClassroomSchema,
+  createGradeSchema,
+  createSubjectSchema,
+  transitionAcademicYearSchema,
+  updateSchoolConfigurationSchema,
+  updateSchoolStatusSchema,
+} from "./schema";
 import {
   archiveGrade,
   archiveSubject,
@@ -14,58 +30,102 @@ import {
   updateSchoolConfiguration,
   updateSchoolStatus,
 } from "./services";
-import {
-  archiveCatalogItemSchema,
-  assignTeacherSchema,
-  createAcademicYearSchema,
-  createClassroomSchema,
-  createGradeSchema,
-  createSubjectSchema,
-  transitionAcademicYearSchema,
-  updateSchoolConfigurationSchema,
-  updateSchoolStatusSchema,
-} from "./schema";
-import { formDataToObject, nullableString, optionalNumber } from "./form-data";
 
-export async function updateSchoolConfigurationAction(formData: FormData): Promise<void> {
-  const raw = formDataToObject(formData);
-  await updateSchoolConfiguration({ headers: await headers(), input: updateSchoolConfigurationSchema.parse({ ...raw, phone: nullableString(formData.get("phone")), address: nullableString(formData.get("address")) }) });
+const ACADEMICS_PATHS = ["/academics", "/academics/years", "/academics/catalog", "/academics/classrooms", "/dashboard"] as const;
+
+function revalidateAcademics() {
+  for (const path of ACADEMICS_PATHS) revalidatePath(path);
 }
 
-export async function updateSchoolStatusAction(formData: FormData): Promise<void> {
-  await updateSchoolStatus({ headers: await headers(), input: updateSchoolStatusSchema.parse(formDataToObject(formData)) });
+export async function updateSchoolConfigurationAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(
+    async () => {
+      const raw = formDataToObject(formData);
+      const result = await updateSchoolConfiguration({
+        headers: await headers(),
+        input: updateSchoolConfigurationSchema.parse({ ...raw, phone: nullableString(formData.get("phone")), address: nullableString(formData.get("address")) }),
+      });
+      revalidatePath("/academics/school");
+      revalidatePath("/dashboard");
+      return result;
+    },
+    "تنظیمات مدرسه ذخیره شد.",
+  );
 }
 
-export async function createAcademicYearAction(formData: FormData): Promise<void> {
-  await createAcademicYear({ headers: await headers(), input: createAcademicYearSchema.parse(formDataToObject(formData)) });
+export async function updateSchoolStatusAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await updateSchoolStatus({ headers: await headers(), input: updateSchoolStatusSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "وضعیت مدرسه به‌روزرسانی شد.");
 }
 
-export async function transitionAcademicYearAction(formData: FormData): Promise<void> {
-  await transitionAcademicYear({ headers: await headers(), input: transitionAcademicYearSchema.parse(formDataToObject(formData)) });
+export async function createAcademicYearAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await createAcademicYear({ headers: await headers(), input: createAcademicYearSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "سال تحصیلی ایجاد شد.");
 }
 
-export async function createGradeAction(formData: FormData): Promise<void> {
-  await createGrade({ headers: await headers(), input: createGradeSchema.parse({ ...formDataToObject(formData), sortOrder: optionalNumber(formData.get("sortOrder")) ?? 0 }) });
+export async function transitionAcademicYearAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await transitionAcademicYear({ headers: await headers(), input: transitionAcademicYearSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "وضعیت سال تحصیلی تغییر کرد.");
 }
 
-export async function createSubjectAction(formData: FormData): Promise<void> {
-  await createSubject({ headers: await headers(), input: createSubjectSchema.parse(formDataToObject(formData)) });
+export async function createGradeAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await createGrade({ headers: await headers(), input: createGradeSchema.parse({ ...formDataToObject(formData), sortOrder: optionalNumber(formData.get("sortOrder")) ?? 0 }) });
+    revalidateAcademics();
+    return result;
+  }, "پایه اضافه شد.");
 }
 
-export async function archiveGradeAction(formData: FormData): Promise<void> {
-  await archiveGrade({ headers: await headers(), input: archiveCatalogItemSchema.parse(formDataToObject(formData)) });
+export async function createSubjectAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await createSubject({ headers: await headers(), input: createSubjectSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "درس اضافه شد.");
 }
 
-export async function archiveSubjectAction(formData: FormData): Promise<void> {
-  await archiveSubject({ headers: await headers(), input: archiveCatalogItemSchema.parse(formDataToObject(formData)) });
+export async function archiveGradeAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await archiveGrade({ headers: await headers(), input: archiveCatalogItemSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "پایه بایگانی شد.");
 }
 
-export async function createClassroomAction(formData: FormData): Promise<void> {
-  const raw = formDataToObject(formData);
-  await createClassroom({ headers: await headers(), input: createClassroomSchema.parse({ ...raw, capacity: optionalNumber(formData.get("capacity")) ?? null }) });
+export async function archiveSubjectAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await archiveSubject({ headers: await headers(), input: archiveCatalogItemSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "درس بایگانی شد.");
 }
 
-export async function assignTeacherAction(formData: FormData): Promise<void> {
-  const raw = formDataToObject(formData);
-  await assignTeacher({ headers: await headers(), input: assignTeacherSchema.parse({ ...raw, subjectId: nullableString(formData.get("subjectId")), endDate: nullableString(formData.get("endDate")), isPrimary: formData.get("isPrimary") === "on" }) });
+export async function createClassroomAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const raw = formDataToObject(formData);
+    const result = await createClassroom({ headers: await headers(), input: createClassroomSchema.parse({ ...raw, capacity: optionalNumber(formData.get("capacity")) ?? null }) });
+    revalidateAcademics();
+    return result;
+  }, "کلاس ایجاد شد.");
+}
+
+export async function assignTeacherAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const raw = formDataToObject(formData);
+    const result = await assignTeacher({
+      headers: await headers(),
+      input: assignTeacherSchema.parse({ ...raw, subjectId: nullableString(formData.get("subjectId")), endDate: nullableString(formData.get("endDate")), isPrimary: formData.get("isPrimary") === "on" }),
+    });
+    revalidateAcademics();
+    return result;
+  }, "دبیر به کلاس تخصیص یافت.");
 }

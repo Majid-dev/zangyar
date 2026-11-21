@@ -49,7 +49,7 @@ export const createEnrollmentSchema = z.object({
   endDate: dateSchema.nullable().optional().default(null),
 }).superRefine((value, context) => {
   if (value.endDate && value.startDate >= value.endDate) {
-    context.addIssue({ code: "custom", path: ["endDate"], message: "End date must be after start date." });
+    context.addIssue({ code: "custom", path: ["endDate"], message: "تاریخ پایان باید بعد از تاریخ شروع باشد." });
   }
 });
 export const transferEnrollmentSchema = z.object({
@@ -59,7 +59,7 @@ export const transferEnrollmentSchema = z.object({
   endDate: dateSchema.nullable().optional().default(null),
 }).superRefine((value, context) => {
   if (value.endDate && value.startDate >= value.endDate) {
-    context.addIssue({ code: "custom", path: ["endDate"], message: "End date must be after start date." });
+    context.addIssue({ code: "custom", path: ["endDate"], message: "تاریخ پایان باید بعد از تاریخ شروع باشد." });
   }
 });
 export const closeEnrollmentSchema = z.object({ enrollmentId: uuid, endDate: dateSchema });

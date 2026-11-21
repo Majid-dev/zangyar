@@ -1,9 +1,8 @@
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
+import { StudentFilters } from "./student-filters";
 import type { StudentListFilter } from "../schema";
 import type { StudentListRow } from "../queries";
 
@@ -23,11 +22,7 @@ export function StudentTable({ rows, total, page, pageSize, search, status, clas
   return (
     <Panel className="overflow-hidden p-0">
       <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <form className="flex min-w-0 flex-1 gap-2" method="get">
-          <label className="min-w-0 flex-1"><span className="sr-only">جست‌وجوی دانش‌آموز</span><Input name="search" defaultValue={search} placeholder="جست‌وجوی نام یا کد" /></label>
-          <Select name="status" className="w-36"><option value="">همه وضعیت‌ها</option><option value="ACTIVE">فعال</option><option value="WITHDRAWN">ترک‌تحصیل</option><option value="GRADUATED">فارغ‌التحصیل</option><option value="ARCHIVED">بایگانی‌شده</option></Select>
-          <Button type="submit" size="sm" variant="secondary">جست‌وجو</Button>
-        </form>
+        <StudentFilters search={search} status={status} />
         <Link href="/students/new" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-primary px-3 text-xs font-bold text-white transition hover:bg-primary/90">افزودن دانش‌آموز</Link>
       </div>
       <div className="overflow-x-auto">

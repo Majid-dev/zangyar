@@ -65,7 +65,7 @@ export const assignTeacherSchema = z.object({
   isPrimary: z.preprocess((value) => value === true || value === "on", z.boolean()).default(false),
 }).superRefine((value, context) => {
   if (value.endDate && value.startDate >= value.endDate) {
-    context.addIssue({ code: "custom", path: ["endDate"], message: "End date must be after start date." });
+    context.addIssue({ code: "custom", path: ["endDate"], message: "تاریخ پایان باید بعد از تاریخ شروع باشد." });
   }
 });
 
