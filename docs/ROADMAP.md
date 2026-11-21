@@ -93,8 +93,8 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 - Enforce session and record uniqueness.
 - Implement teacher assignment authorization.
 - Add correction/finalization behavior after policy confirmation.
-- Read the school's attendance notification policy when creating outbox entries. (Remaining in Phase 6; current persisted slice stops before outbox creation.)
-- Add attendance reports and audit events.
+- Read the school's attendance notification policy and create eligible transactional outbox entries with recipient/message snapshots. (Completed in current Phase 6 slice.)
+- Add attendance reports and expand audit-read coverage.
 
 **Exit criteria:** Authorized staff can record and review daily attendance, while duplicate sessions, invalid enrollments, and cross-tenant access are rejected.
 
@@ -116,8 +116,8 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 
 - Define the `SmsProvider` interface.
 - Implement Mock SMS Provider.
-- Create outbox records transactionally with eligible source events.
-- Implement pending-item processing, retries, idempotency, and logs.
+- Consume pending attendance outbox records created by Phase 6.
+- Implement claiming, retries, delivery idempotency, and provider attempt logs.
 - Add notification status visibility and audit events.
 
 **Exit criteria:** Attendance submission is independent of delivery, pending messages are retried safely, and duplicate sends are prevented.
