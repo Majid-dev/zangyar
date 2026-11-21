@@ -1,6 +1,6 @@
-import { AppShell } from "@/components/layout/app-shell";
-import { PageHeader } from "@/components/layout/page-header";
-import { requirePageAccess } from "@/app/academics/_components/route-access";
+import { AppPage } from "@/components/layout/app-shell";
+import { BackLink, PageHeader } from "@/components/layout/page-header";
+import { requirePageAccess } from "@/features/shell/route-access";
 import { listStudentsForContext } from "@/features/students/queries";
 import { studentListFilterSchema } from "@/features/students/schema";
 import { StudentTable } from "@/features/students/components/student-table";
@@ -19,11 +19,21 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   const data = await listStudentsForContext(access.context, filters);
 
   return (
-    <AppShell active="/students">
-      <main className="mx-auto max-w-[1440px] p-4 sm:p-6 xl:p-8">
-        <PageHeader eyebrow="مدیریت مدرسه" title="دانش‌آموزان" description="فهرست tenant-safe دانش‌آموزان مدرسه و وضعیت ثبت‌نام آن‌ها." action={<span className="rounded-full bg-sage px-3 py-1.5 text-xs font-bold text-primary">{data.total} دانش‌آموز</span>} />
-        <div className="mt-6"><StudentTable {...data} search={filters.search} status={filters.status} classroomId={filters.classroomId} academicYearId={filters.academicYearId} /></div>
-      </main>
-    </AppShell>
+    <AppPage>
+      <PageHeader
+        breadcrumbs={[{ label: "داشبورد", href: "/dashboard" }, { label: "دانش‌آموزان" }]}
+        title="دانش‌آموزان"
+        description="فهرست دانش‌آموزان مدرسه، کلاس فعلی و وضعیت پرونده."
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-sage px-3 py-1.5 text-xs font-bold text-primary">{data.total} دانش‌آموز</span>
+            <BackLink href="/dashboard">بازگشت به داشبورد</BackLink>
+          </div>
+        }
+      />
+      <div className="mt-6">
+        <StudentTable {...data} search={filters.search} status={filters.status} classroomId={filters.classroomId} academicYearId={filters.academicYearId} />
+      </div>
+    </AppPage>
   );
 }
