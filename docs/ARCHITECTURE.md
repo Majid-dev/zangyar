@@ -4,7 +4,7 @@
 
 ZangYar is designed as a modular monolith: one Next.js App Router application contains presentation, server-side application logic, domain modules, and database integration. The application uses a shared PostgreSQL database with shared tables and explicit tenant ownership.
 
-This document describes the intended architecture for product and database implementation. No application features or migrations are included in the current design phase.
+This document describes the architecture implemented incrementally by the application. The repository currently includes the foundation, authentication/tenant authorization, academic management, student/enrollment workflows, and their committed migrations; later attendance, activity, and notification workflows remain in progress.
 
 ## Architectural boundaries
 
@@ -100,7 +100,7 @@ A separate processor claims pending outbox items, sends through an `SmsProvider`
 - Display dates using Persian-friendly formatting in the UI without changing stored instants.
 - Do not derive attendance day boundaries from the server's local timezone.
 
-User-facing forms may accept Persian-calendar dates and convert them to Gregorian dates at the application boundary. Enrollment transfers use effective date ranges: close the previous enrollment and create the next one without overlapping ranges for the same student and academic year.
+User-facing forms may accept Persian-calendar dates and convert them to Gregorian dates at the application boundary. Student, guardian, relationship, and enrollment mutations are owned by `src/features/students` and derive tenant identity from verified membership context. Teachers read students only through active, date-effective classroom assignments; teacher projections omit sensitive guardian contact data. Enrollment transfers use effective date ranges: close the previous enrollment and create the next one without overlapping ranges for the same student and academic year. PostgreSQL exclusion enforcement protects this invariant under concurrent writes.
 
 ## Authentication and roles
 
@@ -141,13 +141,19 @@ The initial Phase 3 authorization boundary is now in place in `src/lib/auth/auth
 - Membership mutations use Zod validation, tenant-scoped updates, transactions, and audit events in `src/features/memberships/services.ts`.
 - Pure active-school selection tests cover missing, ambiguous, matching, and cross-tenant selectors.
 
-Remaining Phase 3 work: add domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions.
+Remaining Phase 3 work: complete persisted authorization verification and continue domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions.
 
 ## Phase 4 implementation status
 
 Phase 4 school and academic management is complete. School Admin operations are authenticated, tenant-scoped, operational-school restricted, and audited. Academic years use guarded lifecycle transitions. Grades, subjects, and classrooms enforce same-school relationships and reject archived catalog records. Teacher assignments require active same-tenant teacher memberships, valid academic-year date windows, active subjects, and duplicate protection. Academic management pages expose school settings, academic years, catalogs, classrooms, and teacher assignment forms. Classroom assignment reads filter inactive records and batch tenant-scoped data loading.
 
 Verification: unit/integration tests, `corepack pnpm typecheck`, `corepack pnpm lint`, `corepack pnpm db:check`, `corepack pnpm build`, `corepack pnpm db:test-clean`, and `corepack pnpm test:integration:phase4` pass. The current persisted Phase 4 suite passes 40 tests in an ephemeral database.
+
+## Phase 5 and Phase 6 implementation status
+
+Phase 5 student, guardian, and enrollment workflows are implemented with tenant-scoped services, normalized identifiers, effective-dated enrollment transfers, PostgreSQL overlap protection, lifecycle audits, and persisted integration coverage. The student list, create route, and tenant-scoped student detail route are available.
+
+Phase 6 attendance now has a tenant/date-authorized persisted vertical slice: daily session uniqueness, effective-roster validation, status upsert, same-day teacher restriction, correction audits, and a server action. Notification outbox policy snapshot and delivery processing remain separate follow-up work; the current attendance service does not yet create outbox records.
 
 ## Implementation sequence
 

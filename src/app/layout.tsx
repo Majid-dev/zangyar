@@ -10,7 +10,7 @@ const vazirmatn = Vazirmatn({
 
 export const metadata: Metadata = {
   title: "زنگ‌یار | مدرسه در جریان، خانواده در کنار",
-  description: "بنیاد مدیریت مدرسه و اطلاع‌رسانی زنگ‌یار",
+  description: "مدیریت مدرسه، حضور و غیاب و ارتباط با خانواده‌ها",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

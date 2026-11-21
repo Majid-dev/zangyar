@@ -50,13 +50,25 @@ try {
       to_regclass('public.schools') as schools,
       to_regclass('public.school_memberships') as memberships,
       to_regclass('public.academic_years') as academic_years,
-      to_regclass('public.classrooms') as classrooms
+      to_regclass('public.classrooms') as classrooms,
+      to_regclass('public.students') as students,
+      to_regclass('public.guardians') as guardians,
+      to_regclass('public.student_guardians') as student_guardians,
+      to_regclass('public.enrollments') as enrollments
+    `);
+  const constraints = await migrated.query(`
+    select conname from pg_constraint
+    where conrelid = 'public.enrollments'::regclass
+      and conname = 'enrollments_no_student_year_overlap'
   `);
   await migrated.end();
 
   const missing = Object.entries(rows[0]).filter(([, value]) => value === null).map(([name]) => name);
   if (missing.length > 0) {
     throw new Error(`Clean migration omitted tables: ${missing.join(", ")}`);
+  }
+  if (constraints.rows.length !== 1) {
+    throw new Error("Clean migration omitted enrollment overlap constraint.");
   }
 
   console.log(`Clean migration passed in database ${temporaryDatabase}.`);

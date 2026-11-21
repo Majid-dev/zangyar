@@ -1,41 +1,46 @@
 @import "tailwindcss";
+@source "../../src";
 
 :root {
-  --background: #f4f7fa;
-  --foreground: #173b57;
+  --background: #f4f1e9;
+  --foreground: #282f36;
   --primary: #173b57;
+  --primary-soft: #e6edf1;
   --secondary: #159a91;
   --accent: #f4a340;
-  --success: #16a36a;
-  --danger: #dc5555;
-  --warning: #e9a23b;
-  --surface: #ffffff;
-  --muted: #5f7180;
-  --border: #dce5eb;
+  --success: #25875f;
+  --danger: #c94d4d;
+  --warning: #d4942e;
+  --surface: #fffefa;
+  --paper: #f4f1e9;
+  --sage: #e3eae7;
+  --muted: #687680;
+  --border: #d8e1df;
+  --focus: #159a91;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-primary: var(--primary);
+  --color-primary-soft: var(--primary-soft);
   --color-secondary: var(--secondary);
   --color-accent: var(--accent);
   --color-success: var(--success);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-surface: var(--surface);
+  --color-paper: var(--paper);
+  --color-sage: var(--sage);
   --color-muted: var(--muted);
   --color-border: var(--border);
+  --color-focus: var(--focus);
   --font-sans: var(--font-vazirmatn);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
-html {
-  background: var(--background);
-}
+html { background: var(--background); }
 
 body {
   min-height: 100vh;
@@ -43,19 +48,19 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-vazirmatn), Tahoma, sans-serif;
+  font-feature-settings: "ss01" 1, "tnum" 1;
 }
 
-button,
-a,
-input,
-select,
-textarea {
-  -webkit-tap-highlight-color: transparent;
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+
+button, a { transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, opacity 160ms ease; }
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
-input,
-select,
-textarea {
+input, select, textarea {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
@@ -65,21 +70,11 @@ textarea {
   font: inherit;
 }
 
-textarea {
-  min-height: 7rem;
-  resize: vertical;
-}
+textarea { min-height: 7rem; resize: vertical; }
 
-.field {
-  display: grid;
-  gap: 0.5rem;
-  color: var(--primary);
-  font-size: 0.875rem;
-  font-weight: 700;
-}
+.field { display: grid; gap: 0.5rem; color: var(--primary); font-size: 0.875rem; font-weight: 700; }
 
-.button-primary,
-.button-secondary {
+.button-primary, .button-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -90,14 +85,9 @@ textarea {
   cursor: pointer;
 }
 
-.button-primary {
-  border: 0;
-  background: var(--primary);
-  color: white;
-}
+.button-primary { border: 0; background: var(--primary); color: white; }
+.button-secondary { border: 1px solid color-mix(in srgb, var(--secondary) 30%, white); background: color-mix(in srgb, var(--secondary) 10%, white); color: var(--secondary); }
 
-.button-secondary {
-  border: 1px solid color-mix(in srgb, var(--secondary) 30%, white);
-  background: color-mix(in srgb, var(--secondary) 10%, white);
-  color: var(--secondary);
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
