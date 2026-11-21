@@ -6,6 +6,7 @@ import { listAcademicYearsForContext } from "@/features/academics/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
+import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
 import { Panel, SectionHeading } from "@/components/ui/panel";
 import { formatPersianDate } from "@/lib/date";
 
@@ -67,8 +68,8 @@ export default async function AcademicYearsPage() {
           <form action={createAcademicYearAction} className="mt-5 grid gap-4">
             <Field label="کد"><Input name="code" placeholder="1405" required dir="ltr" className="text-start" /></Field>
             <Field label="نام سال"><Input name="name" placeholder="سال تحصیلی ۱۴۰۵–۱۴۰۶" required /></Field>
-            <Field label="تاریخ شروع"><Input name="startDate" type="date" required dir="ltr" /></Field>
-            <Field label="تاریخ پایان"><Input name="endDate" type="date" required dir="ltr" /></Field>
+            <Field label="تاریخ شروع"><JalaliDatePicker name="startDate" required /></Field>
+            <Field label="تاریخ پایان"><JalaliDatePicker name="endDate" required /></Field>
             <div><Button type="submit" className="w-full">ایجاد سال تحصیلی</Button></div>
           </form>
         </Panel>

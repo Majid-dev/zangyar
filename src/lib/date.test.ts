@@ -15,7 +15,7 @@ describe("formatPersianDate", () => {
     const formatted = formatPersianDate("2026-11-21");
     expect(formatted).toContain("۱۴۰۵");
     expect(formatted).toContain("آبان");
-    expect(formatPersianDateShort("2026-11-21")).toBe("۱۴۰۵/۸/۳۰");
+    expect(formatPersianDateShort("2026-11-21")).toBe("۱۴۰۵/۰۸/۳۰");
   });
 
   it("is stable across the whole stored day regardless of runtime timezone", () => {

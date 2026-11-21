@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
+import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
 import { Panel, SectionHeading } from "@/components/ui/panel";
 import { formatPersianDate } from "@/lib/date";
 
@@ -113,8 +114,8 @@ export default async function ClassroomsPage() {
                       {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                     </Select>
                   </Field>
-                  <Field label="شروع تخصیص"><Input name="startDate" type="date" required dir="ltr" /></Field>
-                  <Field label="پایان" hint="اختیاری"><Input name="endDate" type="date" dir="ltr" /></Field>
+                  <Field label="شروع تخصیص"><JalaliDatePicker name="startDate" required /></Field>
+                  <Field label="پایان" hint="اختیاری"><JalaliDatePicker name="endDate" /></Field>
                   <label className="flex items-center gap-2 text-sm font-bold text-primary sm:col-span-2">
                     <input name="isPrimary" type="checkbox" className="size-4" />
                     دبیر اصلی کلاس

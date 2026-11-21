@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { getSchoolBusinessDate } from "@/lib/date";
 import { academicYears, classrooms, enrollments, guardians, studentGuardians, students } from "@/lib/db/schema";
 
 import { requireStudentManagementAccess } from "./policy";
@@ -123,7 +124,9 @@ export async function transitionStudent(options: { headers: Headers; input: Tran
     const [updatedStudent] = await tx.update(students).set({ status: input.status, updatedAt: new Date() }).where(and(eq(students.id, input.studentId), eq(students.schoolId, context.schoolId))).returning();
 
     if (input.status !== "ACTIVE") {
-      const today = new Date().toISOString().slice(0, 10);
+      // Use the school's business date, not the server's UTC date, so a withdrawal
+      // near midnight in Tehran cannot close enrollments a day early or late.
+      const today = getSchoolBusinessDate(context.school.timezone);
       const closedEnrollments = await tx.update(enrollments).set({ status: "ARCHIVED", endDate: sql`GREATEST(${enrollments.startDate}, ${today}::date)`, updatedAt: new Date() }).where(and(
         eq(enrollments.schoolId, context.schoolId),
         eq(enrollments.studentId, student.id),

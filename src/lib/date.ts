@@ -1,39 +1,35 @@
+import { formatJalaliMonth, formatStoredDate, isoToJalali, type JalaliFormat } from "./jalali";
+
 export function getSchoolBusinessDate(timezone: string, instant = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
 }
 
-const persianDateFormatter = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-  timeZone: "UTC",
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-});
-
-const persianMonthFormatter = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "UTC", year: "numeric", month: "long" });
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
- * Formats a stored Gregorian `date` (YYYY-MM-DD) for display in the Persian
- * calendar. Storage stays Gregorian; only presentation changes. Anything that is
- * not a stored date is returned untouched so callers cannot render "Invalid Date".
+ * Display helpers for stored Gregorian `date` values (YYYY-MM-DD).
+ * All of these render in the Persian calendar through `@/lib/jalali`; storage and
+ * every server-side contract remain Gregorian, so no formatted Persian string is
+ * ever persisted and no date-only value is shifted by a timezone.
  */
 export function formatPersianDate(value: string | null | undefined, fallback = "—") {
-  if (!value) return fallback;
-  if (!ISO_DATE.test(value)) return value;
-  const [year, month, day] = value.split("-").map(Number);
-  return persianDateFormatter.format(new Date(Date.UTC(year, month - 1, day)));
+  return formatStoredDate(value, "long", fallback);
 }
 
-export function formatPersianMonth(value: string | null | undefined, fallback = "—") {
-  if (!value || !ISO_DATE.test(value)) return fallback;
-  const [year, month, day] = value.split("-").map(Number);
-  return persianMonthFormatter.format(new Date(Date.UTC(year, month - 1, day)));
+export function formatPersianDateMedium(value: string | null | undefined, fallback = "—") {
+  return formatStoredDate(value, "medium", fallback);
 }
 
-/** Short numeric form such as ۱۴۰۵/۰۸/۳۰ for compact table cells. */
+/** Compact numeric form such as ۱۴۰۵/۰۸/۳۰ for table cells. */
 export function formatPersianDateShort(value: string | null | undefined, fallback = "—") {
-  if (!value || !ISO_DATE.test(value)) return fallback;
-  const [year, month, day] = value.split("-").map(Number);
-  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, day)));
+  return formatStoredDate(value, "numeric", fallback);
+}
+
+/** Month label such as «آذر ۱۴۰۵» for range captions. */
+export function formatPersianMonth(value: string | null | undefined, fallback = "—") {
+  if (!value) return fallback;
+  const jalali = isoToJalali(value);
+  return jalali ? formatJalaliMonth(jalali) : value;
+}
+
+export function formatStoredDateAs(value: string | null | undefined, style: JalaliFormat, fallback = "—") {
+  return formatStoredDate(value, style, fallback);
 }
