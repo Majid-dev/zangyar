@@ -153,7 +153,7 @@ Verification: unit/integration tests, `corepack pnpm typecheck`, `corepack pnpm 
 
 Phase 5 student, guardian, and enrollment workflows are implemented with tenant-scoped services, normalized identifiers, effective-dated enrollment transfers, PostgreSQL overlap protection, lifecycle audits, and persisted integration coverage. The student list, create route, and tenant-scoped student detail route are available.
 
-Phase 6 attendance now has a tenant/date-authorized persisted vertical slice: daily session uniqueness, effective-roster validation, status upsert, same-day teacher restriction, correction audits, and a server action. Notification outbox policy snapshot and delivery processing remain separate follow-up work; the current attendance service does not yet create outbox records.
+Phase 6 attendance now has a tenant/date-authorized persisted vertical slice: daily session uniqueness, effective-roster validation, status upsert, same-day teacher restriction, correction audits, server action, and transactional notification intent. Attendance reads school-local status policy, creates one pending outbox intent per eligible active SMS guardian, and snapshots recipient mobile, message, and policy decision. Same-status resubmission is idempotent by school, attendance record, guardian, and resulting status. SMS provider delivery, claiming, retries, logs, and delivery visibility remain Phase 8 work.
 
 ## Implementation sequence
 

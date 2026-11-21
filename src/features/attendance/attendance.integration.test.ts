@@ -5,7 +5,7 @@ vi.mock("server-only", () => ({}));
 
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { academicYears, attendanceRecords, attendanceSessions, classrooms, enrollments, grades, schoolMemberships, schools, students, users } from "@/lib/db/schema";
+import { academicYears, attendanceRecords, attendanceSessions, classrooms, enrollments, guardians, grades, notificationOutbox, schoolMemberships, schoolSettings, schools, studentGuardians, students, users } from "@/lib/db/schema";
 import { submitAttendanceForContext } from "./services";
 
 config({ path: ".env.local" });
@@ -15,6 +15,7 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
   let context: { membershipId: string; schoolId: string; userId: string; role: "SCHOOL_ADMIN"; school: typeof schools.$inferSelect };
   let classroomId: string;
   let enrollmentId: string;
+  let guardianId: string;
 
   beforeAll(async () => {
     const db = getDb();
@@ -27,15 +28,29 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
     const [classroom] = await db.insert(classrooms).values({ schoolId: school.id, academicYearId: year.id, gradeId: grade.id, code: "A", name: "کلاس اول" }).returning();
     const [student] = await db.insert(students).values({ schoolId: school.id, admissionNumber: "1", firstName: "آرین", lastName: "احمدی" }).returning();
     const enrollment = await db.insert(enrollments).values({ schoolId: school.id, studentId: student.id, academicYearId: year.id, classroomId: classroom.id, startDate: "2026-09-23" }).returning();
+    const [guardian] = await db.insert(guardians).values({ schoolId: school.id, firstName: "مریم", lastName: "احمدی", normalizedMobile: "09120000000" }).returning();
+    await db.insert(studentGuardians).values({ schoolId: school.id, studentId: student.id, guardianId: guardian.id, relationshipType: "مادر", receivesSms: true });
+    await db.insert(schoolSettings).values({ schoolId: school.id, notifyOnPresent: true });
     context = { membershipId: membership.id, schoolId: school.id, userId, role: "SCHOOL_ADMIN", school };
     classroomId = classroom.id;
     enrollmentId = enrollment[0].id;
+    guardianId = guardian.id;
   });
 
-  it("persists one daily session and attendance record", async () => {
+  it("persists one daily session, attendance record, and notification intent", async () => {
     await submitAttendanceForContext(context, { classroomId, businessDate: "2026-11-20", records: [{ enrollmentId, status: "PRESENT" }] });
     const db = getDb();
     expect(await db.select().from(attendanceSessions).where(and(eq(attendanceSessions.schoolId, context.schoolId), eq(attendanceSessions.classroomId, classroomId)))).toHaveLength(1);
-    expect(await db.select().from(attendanceRecords).where(and(eq(attendanceRecords.schoolId, context.schoolId), eq(attendanceRecords.enrollmentId, enrollmentId)))).toHaveLength(1);
+    const [savedRecord] = await db.select().from(attendanceRecords).where(and(eq(attendanceRecords.schoolId, context.schoolId), eq(attendanceRecords.enrollmentId, enrollmentId)));
+    expect(savedRecord).toBeDefined();
+    const [outbox] = await db.select().from(notificationOutbox).where(and(eq(notificationOutbox.schoolId, context.schoolId), eq(notificationOutbox.guardianId, guardianId)));
+    expect(outbox).toMatchObject({ eventType: "ATTENDANCE", attendanceRecordId: savedRecord.id, recipientMobile: "09120000000", policyDecision: true, status: "PENDING" });
+  });
+
+  it("does not duplicate notification intent on repeated same-status submission", async () => {
+    await submitAttendanceForContext(context, { classroomId, businessDate: "2026-11-20", records: [{ enrollmentId, status: "PRESENT" }] });
+    await submitAttendanceForContext(context, { classroomId, businessDate: "2026-11-20", records: [{ enrollmentId, status: "PRESENT" }] });
+    const outbox = await getDb().select().from(notificationOutbox).where(and(eq(notificationOutbox.schoolId, context.schoolId), eq(notificationOutbox.guardianId, guardianId)));
+    expect(outbox).toHaveLength(1);
   });
 });

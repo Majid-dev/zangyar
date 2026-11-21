@@ -110,9 +110,13 @@ export async function listStudentEnrollmentsForContext(context: ActiveSchoolMemb
     .orderBy(desc(enrollments.startDate));
 }
 
-export async function listEffectiveClassroomStudentsForContext(context: ActiveSchoolMembership, input: { classroomId: string; businessDate: string }) {
+export async function listEffectiveClassroomStudentsForContext(
+  context: ActiveSchoolMembership,
+  input: { classroomId: string; businessDate: string },
+  executor: Pick<ReturnType<typeof getDb>, "select"> = getDb(),
+) {
   const parsed = rosterSchema.parse(input);
-  const db = getDb();
+  const db = executor;
   const conditions = and(
     eq(enrollments.schoolId, context.schoolId),
     eq(enrollments.classroomId, parsed.classroomId),

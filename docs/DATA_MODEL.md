@@ -156,7 +156,7 @@ Activities reference school, classroom, academic year, date, category, and creat
 
 ### `notification_outbox`
 
-Include school, event type, source attendance/activity reference, guardian reference, recipient mobile snapshot, message snapshot, notification-policy decision/snapshot, idempotency key, status, attempt count, next-attempt timestamp, error details, and processing timestamps. School Admins configure attendance event triggers in school settings. For the MVP, prefer concrete source foreign keys for attendance notifications over a generic polymorphic reference. Unique `(schoolId, idempotencyKey)`.
+Include school, event type, source attendance/activity reference, guardian reference, recipient mobile snapshot, message snapshot, notification-policy decision/snapshot, idempotency key, status, attempt count, next-attempt timestamp, error details, and processing timestamps. Phase 6 creates one pending attendance intent per eligible active SMS guardian in the same transaction as the attendance record; disabled policy statuses and ineligible guardians create no row. Same-status resubmission uses a deterministic key scoped to school, attendance record, guardian, and resulting status. School Admins configure attendance event triggers in school settings. For the MVP, prefer concrete source foreign keys for attendance notifications over a generic polymorphic reference. Unique `(schoolId, idempotencyKey)`.
 
 ### `notification_logs`
 

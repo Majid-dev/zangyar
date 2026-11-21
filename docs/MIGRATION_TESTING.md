@@ -22,4 +22,8 @@ Run `corepack pnpm test:integration:phase5`.
 
 This command creates an isolated ephemeral database, applies migrations, runs the persisted student, guardian, cross-tenant, enrollment-transfer, and overlap tests, then drops the temporary database. It verifies school-local student and guardian records, relationship safety, and effective-dated enrollment history.
 
-The attendance route is currently a roster preview. Phase 6 persistence tests will be added with the attendance mutation wrapper.
+## Phase 6 persisted integration tests
+
+Run `corepack pnpm test:integration:phase6`.
+
+This command creates an isolated ephemeral database, applies migrations, runs persisted attendance tests, then drops the temporary database. It verifies daily session and record persistence, school notification policy evaluation, eligible guardian filtering, recipient/policy snapshots, pending outbox intent, and same-status idempotency. SMS delivery, retries, and provider logs remain Phase 8 coverage.
