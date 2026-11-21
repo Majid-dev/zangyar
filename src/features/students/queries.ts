@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, ilike, isNull, lte, or, gt } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, isNull, lte, or, sql } from "drizzle-orm";
 
 import { requireStudentManagementAccess, requireStudentReadAccess } from "./policy";
 import { maskMobile } from "./normalization";
@@ -29,11 +29,19 @@ export async function listStudents(options: { headers: Headers; filters?: Partia
 export async function listStudentsForContext(context: ActiveSchoolMembership, filters: StudentListFilter) {
   const db = getDb();
   const search = filters.search ? `%${filters.search}%` : undefined;
-  const conditions = and(
+  const studentConditions = and(
     eq(students.schoolId, context.schoolId),
     filters.status ? eq(students.status, filters.status) : undefined,
     search ? or(ilike(students.firstName, search), ilike(students.lastName, search), ilike(students.admissionNumber, search)) : undefined,
   );
+  const enrollmentConditions = and(
+    eq(enrollments.schoolId, context.schoolId),
+    eq(enrollments.studentId, students.id),
+    eq(enrollments.status, "ACTIVE"),
+    filters.classroomId ? eq(enrollments.classroomId, filters.classroomId) : undefined,
+    filters.academicYearId ? eq(enrollments.academicYearId, filters.academicYearId) : undefined,
+  );
+  const conditions = and(studentConditions, filters.classroomId || filters.academicYearId ? sql`${enrollments.id} is not null` : undefined);
 
   const [rows, totals] = await Promise.all([
     db.select({
@@ -44,13 +52,7 @@ export async function listStudentsForContext(context: ActiveSchoolMembership, fi
       guardianLastName: guardians.lastName,
       guardianMobile: guardians.normalizedMobile,
     }).from(students)
-      .leftJoin(enrollments, and(
-        eq(enrollments.schoolId, context.schoolId),
-        eq(enrollments.studentId, students.id),
-        eq(enrollments.status, "ACTIVE"),
-        filters.classroomId ? eq(enrollments.classroomId, filters.classroomId) : undefined,
-        filters.academicYearId ? eq(enrollments.academicYearId, filters.academicYearId) : undefined,
-      ))
+      .leftJoin(enrollments, enrollmentConditions)
       .leftJoin(classrooms, and(eq(classrooms.id, enrollments.classroomId), eq(classrooms.schoolId, context.schoolId)))
       .leftJoin(academicYears, and(eq(academicYears.id, enrollments.academicYearId), eq(academicYears.schoolId, context.schoolId)))
       .leftJoin(studentGuardians, and(eq(studentGuardians.studentId, students.id), eq(studentGuardians.schoolId, context.schoolId), eq(studentGuardians.isPrimary, true)))
@@ -59,7 +61,9 @@ export async function listStudentsForContext(context: ActiveSchoolMembership, fi
       .orderBy(asc(students.lastName), asc(students.firstName), asc(students.admissionNumber), asc(students.id))
       .limit(filters.pageSize)
       .offset((filters.page - 1) * filters.pageSize),
-    db.select({ total: count() }).from(students).where(conditions),
+    db.select({ total: count() }).from(students)
+      .leftJoin(enrollments, enrollmentConditions)
+      .where(conditions),
   ]);
 
   return {

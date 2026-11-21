@@ -13,6 +13,8 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     search: typeof params.search === "string" ? params.search : undefined,
     status: typeof params.status === "string" && params.status.length > 0 ? params.status : undefined,
     page: typeof params.page === "string" ? params.page : undefined,
+    classroomId: typeof params.classroomId === "string" ? params.classroomId : undefined,
+    academicYearId: typeof params.academicYearId === "string" ? params.academicYearId : undefined,
   });
   const data = await listStudentsForContext(access.context, filters);
 
@@ -20,7 +22,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     <AppShell active="/students">
       <main className="mx-auto max-w-[1440px] p-4 sm:p-6 xl:p-8">
         <PageHeader eyebrow="مدیریت مدرسه" title="دانش‌آموزان" description="فهرست tenant-safe دانش‌آموزان مدرسه و وضعیت ثبت‌نام آن‌ها." action={<span className="rounded-full bg-sage px-3 py-1.5 text-xs font-bold text-primary">{data.total} دانش‌آموز</span>} />
-        <div className="mt-6"><StudentTable {...data} search={filters.search} /></div>
+        <div className="mt-6"><StudentTable {...data} search={filters.search} status={filters.status} classroomId={filters.classroomId} academicYearId={filters.academicYearId} /></div>
       </main>
     </AppShell>
   );

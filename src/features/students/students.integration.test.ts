@@ -40,7 +40,7 @@ describe.skipIf(!canRun)("persisted Phase 5 student management", () => {
     schoolA = (await db.insert(schools).values({ slug: `phase5-a-${crypto.randomUUID()}`, name: "Phase 5 A" }).returning({ id: schools.id }))[0].id;
     schoolB = (await db.insert(schools).values({ slug: `phase5-b-${crypto.randomUUID()}`, name: "Phase 5 B" }).returning({ id: schools.id }))[0].id;
     await db.insert(schoolMemberships).values({ schoolId: schoolA, userId: admin.id, role: "SCHOOL_ADMIN", status: "ACTIVE" });
-    yearA = (await db.insert(academicYears).values({ schoolId: schoolA, code: "1405", name: "سال ۱۴۰۵", startDate: "2026-09-23", endDate: "2027-06-21" }).returning({ id: academicYears.id }))[0].id;
+    yearA = (await db.insert(academicYears).values({ schoolId: schoolA, code: "1405", name: "سال ۱۴۰۵", startDate: "2026-09-23", endDate: "2027-06-21", status: "ACTIVE" }).returning({ id: academicYears.id }))[0].id;
     const grade = (await db.insert(grades).values({ schoolId: schoolA, code: "G1", name: "Grade", sortOrder: 1 }).returning({ id: grades.id }))[0].id;
     classroomA = (await db.insert(classrooms).values({ schoolId: schoolA, academicYearId: yearA, gradeId: grade, code: "A", name: "Class A" }).returning({ id: classrooms.id }))[0].id;
     classroomB = (await db.insert(classrooms).values({ schoolId: schoolA, academicYearId: yearA, gradeId: grade, code: "B", name: "Class B" }).returning({ id: classrooms.id }))[0].id;

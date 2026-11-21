@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { getDb } from "@/lib/db";
@@ -47,7 +47,7 @@ async function assertEnrollmentResources(tx: Parameters<Parameters<ReturnType<ty
   if (!student || student.status !== "ACTIVE") throw new Error("Student is not available for enrollment.");
 
   const [academicYear] = await tx.select().from(academicYears).where(and(eq(academicYears.id, input.academicYearId), eq(academicYears.schoolId, schoolId))).limit(1);
-  if (!academicYear || academicYear.status === "ARCHIVED") throw new Error("Academic year is not available for enrollment.");
+  if (!academicYear || academicYear.status !== "ACTIVE") throw new Error("Only an active academic year is available for enrollment.");
 
   const [classroom] = await tx.select().from(classrooms).where(and(eq(classrooms.id, input.classroomId), eq(classrooms.schoolId, schoolId))).limit(1);
   if (!classroom || classroom.status === "ARCHIVED" || classroom.academicYearId !== academicYear.id) throw new Error("Classroom is not available in this academic year.");
@@ -118,10 +118,24 @@ export async function transitionStudent(options: { headers: Headers; input: Tran
   const context = await operationalContext(options.headers);
   const input = transitionStudentSchema.parse(options.input);
   return getDb().transaction(async (tx) => {
-    const [student] = await tx.update(students).set({ status: input.status, updatedAt: new Date() }).where(and(eq(students.id, input.studentId), eq(students.schoolId, context.schoolId))).returning();
+    const [student] = await tx.select().from(students).where(and(eq(students.id, input.studentId), eq(students.schoolId, context.schoolId))).limit(1);
     if (!student) throw new Error("Student not found.");
-    await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "STUDENT_STATUS_CHANGED", entityType: "STUDENT", entityId: student.id, metadata: { status: student.status } });
-    return student;
+    const [updatedStudent] = await tx.update(students).set({ status: input.status, updatedAt: new Date() }).where(and(eq(students.id, input.studentId), eq(students.schoolId, context.schoolId))).returning();
+
+    if (input.status !== "ACTIVE") {
+      const today = new Date().toISOString().slice(0, 10);
+      const closedEnrollments = await tx.update(enrollments).set({ status: "ARCHIVED", endDate: sql`GREATEST(${enrollments.startDate}, ${today}::date)`, updatedAt: new Date() }).where(and(
+        eq(enrollments.schoolId, context.schoolId),
+        eq(enrollments.studentId, student.id),
+        eq(enrollments.status, "ACTIVE"),
+      )).returning({ id: enrollments.id, endDate: enrollments.endDate });
+      for (const enrollment of closedEnrollments) {
+        await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "ENROLLMENT_CLOSED", entityType: "ENROLLMENT", entityId: enrollment.id, metadata: { endDate: enrollment.endDate, reason: "STUDENT_STATUS_CHANGED" } });
+      }
+    }
+
+    await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "STUDENT_STATUS_CHANGED", entityType: "STUDENT", entityId: student.id, metadata: { previousStatus: student.status, status: updatedStudent.status } });
+    return updatedStudent;
   });
 }
 

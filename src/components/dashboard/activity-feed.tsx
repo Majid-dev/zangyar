@@ -1,13 +1,11 @@
 import { Panel, SectionHeading } from "@/components/ui/panel";
 import { Badge } from "@/components/ui/badge";
 
-const activities = [
-  { title: "حضور و غیاب کلاس هفتم الف ثبت شد", meta: "مریم احمدی · ۸:۲۴", tone: "success" as const, mark: "✓" },
-  { title: "کلاس پنجم ب نیازمند بررسی است", meta: "رضا کریمی · ۸:۳۸", tone: "warning" as const, mark: "!" },
-  { title: "سال تحصیلی جدید فعال شد", meta: "مدیریت مدرسه · دیروز", tone: "info" as const, mark: "↗" },
-];
-
-export function ActivityFeed() {
+export function ActivityFeed({ date, pendingClassroomCount }: { date: string; pendingClassroomCount: number }) {
+  const activities = [
+    { title: pendingClassroomCount === 0 ? "ثبت حضور همه کلاس‌ها کامل شد" : `${pendingClassroomCount} کلاس در انتظار ثبت حضور است`, meta: date, tone: pendingClassroomCount === 0 ? "success" as const : "warning" as const, mark: pendingClassroomCount === 0 ? "✓" : "!" },
+    { title: "فهرست دانش‌آموزان از ثبت‌نام‌های فعال خوانده شد", meta: "داده مدرسه", tone: "info" as const, mark: "↗" },
+  ];
   return (
     <Panel>
       <SectionHeading title="آخرین فعالیت‌ها" action={<span className="text-xs text-muted">امروز</span>} />

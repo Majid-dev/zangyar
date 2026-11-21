@@ -273,7 +273,7 @@ export const studentGuardians = pgTable("student_guardians", {
   schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
   studentId: uuid("student_id").notNull(),
   guardianId: uuid("guardian_id").notNull(),
-  relationshipType: varchar("relationship_type", { length: 64 }),
+  relationshipType: varchar("relationship_type", { length: 64 }).notNull(),
   isPrimary: boolean("is_primary").default(false).notNull(),
   receivesSms: boolean("receives_sms").default(false).notNull(),
   isEmergency: boolean("is_emergency").default(false).notNull(),

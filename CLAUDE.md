@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 ## Project
 
-ZangYar (زنگ‌یار) is a Persian, RTL, multi-tenant school-management and parent-notification SaaS for schools in Iran. Build it as a modular monolith: one Next.js application containing the UI and server-side domain logic. Product and domain design are approved in `docs/`; Phase 2 establishes the foundation before domain schema and business workflows.
+ZangYar (زنگ‌یار) is a Persian, RTL, multi-tenant school-management and parent-notification SaaS for schools in Iran. Build it as a modular monolith: one Next.js application containing the UI and server-side domain logic. Product and domain design are approved in `docs/`; the foundation, academic management, and student/enrollment slices are implemented incrementally.
 
 ## Technology
 
@@ -40,7 +40,7 @@ Resolve the active school from the authenticated user's verified membership; nev
 
 ## Development commands
 
-The current foundation scripts are defined in `package.json`. Use Corepack when pnpm is not directly available on PATH:
+Current verification and integration scripts are defined in `package.json`. Use Corepack when pnpm is not directly available on PATH:
 
 ```bash
 corepack pnpm install
@@ -56,7 +56,7 @@ docker compose up -d postgres
 docker compose ps
 ```
 
-The current foundation has no domain migrations or end-to-end test suite yet, so do not document migration or `test:e2e` commands as available. Do not document a command as verified until it exists in the project configuration and has been run successfully. Report unavailable or failing checks plainly.
+The project has committed domain migrations and persisted Phase 4/5 integration wrappers; no end-to-end test suite is configured yet. Do not document `test:e2e` as available. Do not document a command as verified until it exists in project configuration and has been run successfully. Report unavailable or failing checks plainly.
 
 # Repository Exploration Rules
 
@@ -70,7 +70,7 @@ The current foundation has no domain migrations or end-to-end test suite yet, so
 
 ## Documentation expectations
 
-Update the relevant files in `docs/` when architecture, tenant isolation, data-model, product scope, roadmap, or significant technical decisions change. Keep the root guidance concise and put detailed workflows in project-specific Claude skills. Phase 2 creates only the working foundation; do not implement MVP entities, domain migrations, or business workflows until the foundation is reviewed.
+Update relevant files in `docs/` when architecture, tenant isolation, data-model, product scope, roadmap, or significant technical decisions change. Keep root guidance concise and put detailed workflows in project-specific Claude skills. Implement each approved domain slice behind tenant-scoped services, migrations, and tests; do not bypass the authorization boundary.
 
 # ZangYar — UI/UX & Visual Design Principles
 

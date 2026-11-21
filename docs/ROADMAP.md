@@ -83,7 +83,9 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 
 ## Phase 6 — Daily attendance
 
-**Status:** Planned
+**Status:** In progress
+
+**Completed slice:** Tenant/date-authorized classroom roster, daily session/record persistence, four-status upsert, same-day teacher restriction, correction audit events, Server Action wiring, data-backed attendance dashboard summary, and isolated Phase 6 integration wrapper/test.
 
 - Implement school-local business-date handling.
 - Create or load one daily session per classroom/date.
@@ -91,7 +93,7 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 - Enforce session and record uniqueness.
 - Implement teacher assignment authorization.
 - Add correction/finalization behavior after policy confirmation.
-- Read the school's attendance notification policy when creating outbox entries.
+- Read the school's attendance notification policy when creating outbox entries. (Remaining in Phase 6; current persisted slice stops before outbox creation.)
 - Add attendance reports and audit events.
 
 **Exit criteria:** Authorized staff can record and review daily attendance, while duplicate sessions, invalid enrollments, and cross-tenant access are rejected.

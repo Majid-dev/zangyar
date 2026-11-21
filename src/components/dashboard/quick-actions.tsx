@@ -2,12 +2,11 @@ import Link from "next/link";
 
 import { Panel, SectionHeading } from "@/components/ui/panel";
 
-const actions = [
-  { label: "ثبت حضور و غیاب", detail: "۱۲ کلاس منتظر ثبت", href: "/attendance", variant: "primary" as const },
-  { label: "افزودن دانش‌آموز", detail: "ثبت یک دانش‌آموز جدید", href: "/students", variant: "secondary" as const },
-];
-
-export function QuickActions() {
+export function QuickActions({ pendingClassroomCount }: { pendingClassroomCount: number }) {
+  const actions = [
+    { label: "ثبت حضور و غیاب", detail: pendingClassroomCount === 0 ? "بررسی وضعیت امروز" : `${pendingClassroomCount} کلاس منتظر ثبت`, href: "/attendance", variant: "primary" as const },
+    { label: "افزودن دانش‌آموز", detail: "ثبت یک دانش‌آموز جدید", href: "/students/new", variant: "secondary" as const },
+  ];
   return (
     <Panel>
       <SectionHeading title="اقدام بعدی" description="کارهای پرتکرار را از همین‌جا شروع کنید." />

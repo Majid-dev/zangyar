@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
+import type { StudentListFilter } from "../schema";
 import type { StudentListRow } from "../queries";
 
 const statusLabels = {
@@ -13,10 +14,11 @@ const statusLabels = {
   ARCHIVED: "بایگانی‌شده",
 } as const;
 
-export function StudentTable({ rows, total, page, pageSize, search }: { rows: StudentListRow[]; total: number; page: number; pageSize: number; search?: string }) {
+export function StudentTable({ rows, total, page, pageSize, search, status, classroomId, academicYearId }: { rows: StudentListRow[]; total: number; page: number; pageSize: number; search?: string; status?: StudentListFilter["status"]; classroomId?: string; academicYearId?: string }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const previous = new URLSearchParams({ ...(search ? { search } : {}), page: String(Math.max(1, page - 1)) });
-  const next = new URLSearchParams({ ...(search ? { search } : {}), page: String(Math.min(pageCount, page + 1)) });
+  const filterParams = { ...(search ? { search } : {}), ...(status ? { status } : {}), ...(classroomId ? { classroomId } : {}), ...(academicYearId ? { academicYearId } : {}) };
+  const previous = new URLSearchParams({ ...filterParams, page: String(Math.max(1, page - 1)) });
+  const next = new URLSearchParams({ ...filterParams, page: String(Math.min(pageCount, page + 1)) });
 
   return (
     <Panel className="overflow-hidden p-0">
@@ -26,7 +28,7 @@ export function StudentTable({ rows, total, page, pageSize, search }: { rows: St
           <Select name="status" className="w-36"><option value="">همه وضعیت‌ها</option><option value="ACTIVE">فعال</option><option value="WITHDRAWN">ترک‌تحصیل</option><option value="GRADUATED">فارغ‌التحصیل</option><option value="ARCHIVED">بایگانی‌شده</option></Select>
           <Button type="submit" size="sm" variant="secondary">جست‌وجو</Button>
         </form>
-        <Button type="button" size="sm" disabled>افزودن دانش‌آموز</Button>
+        <Link href="/students/new" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-primary px-3 text-xs font-bold text-white transition hover:bg-primary/90">افزودن دانش‌آموز</Link>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[700px] text-start text-sm">

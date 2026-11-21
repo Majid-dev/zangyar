@@ -136,7 +136,7 @@ School-local admission/student number, name, optional national identifier, date 
 
 ### `guardians` and `student_guardians`
 
-Store a normalized mobile number for matching and delivery. A non-null normalized mobile number is unique within a school via `(schoolId, normalizedMobile)`; a guardian without a mobile number is not eligible for SMS. `student_guardians` is unique on `(schoolId, studentId, guardianId)` and includes relationship, primary, emergency, and SMS-recipient flags. A partial unique index may enforce one primary guardian per student.
+Store a normalized mobile number for matching and delivery. A non-null normalized mobile number is unique within a school via `(schoolId, normalizedMobile)`; a guardian without a mobile number is not eligible for SMS. `student_guardians` requires a non-empty relationship type, is unique on `(schoolId, studentId, guardianId)`, and includes primary, emergency, and SMS-recipient flags. A partial unique index may enforce one primary guardian per student.
 
 ### `enrollments`
 

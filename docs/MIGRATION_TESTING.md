@@ -14,4 +14,12 @@ Run `corepack pnpm test:integration:phase4`.
 
 This command creates an isolated ephemeral database, applies migrations, runs the persisted school and academic-management tests, then drops the database. It verifies tenant-scoped school configuration, academic-year lifecycle, grade/subject/classroom creation, teacher assignment, audit events, and role rejection.
 
-Do not run the Phase 4 integration test directly against a shared development database. Use the wrapper command so test records cannot affect local data.
+Do not run persisted integration tests directly against a shared development database. Use isolated wrapper commands so test records cannot affect local data.
+
+## Phase 5 persisted integration tests
+
+Run `corepack pnpm test:integration:phase5`.
+
+This command creates an isolated ephemeral database, applies migrations, runs the persisted student, guardian, cross-tenant, enrollment-transfer, and overlap tests, then drops the temporary database. It verifies school-local student and guardian records, relationship safety, and effective-dated enrollment history.
+
+The attendance route is currently a roster preview. Phase 6 persistence tests will be added with the attendance mutation wrapper.

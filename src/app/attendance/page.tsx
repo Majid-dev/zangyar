@@ -16,7 +16,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   return (
     <AppShell active="/attendance">
       <main className="mx-auto max-w-[1440px] p-4 sm:p-6 xl:p-8">
-        <PageHeader eyebrow="عملیات روزانه · پیش‌نمایش فاز ۵" title="ثبت حضور و غیاب" description="فهرست کلاس و دانش‌آموزان از ثبت‌نام‌های مؤثر خوانده می‌شود؛ ثبت حضور در فاز بعد فعال می‌شود." action={<span className="rounded-full bg-accent/15 px-3 py-1.5 text-xs font-bold text-[#8b5a08]">{workspace.date}</span>} />
+        <PageHeader eyebrow="عملیات روزانه" title="ثبت حضور و غیاب" description="فهرست کلاس و دانش‌آموزان از ثبت‌نام‌های مؤثر خوانده می‌شود؛ وضعیت امروز را ثبت کنید." action={<span className="rounded-full bg-accent/15 px-3 py-1.5 text-xs font-bold text-[#8b5a08]">{workspace.date}</span>} />
         <div className="mt-6"><AttendanceWorkspace workspace={workspace} /></div>
       </main>
     </AppShell>
