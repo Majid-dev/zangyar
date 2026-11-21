@@ -1,7 +1,9 @@
 import { z } from "zod";
 
+import { isoDateSchema } from "@/lib/date-schema";
+
 const uuid = z.string().uuid();
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const date = isoDateSchema;
 const status = z.enum(["PRESENT", "ABSENT", "LATE", "EXCUSED"]);
 
 export const submitAttendanceSchema = z.object({

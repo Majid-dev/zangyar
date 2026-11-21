@@ -1,16 +1,11 @@
 import { z } from "zod";
 
+import { isoDateSchema } from "@/lib/date-schema";
 import { isValidIranianMobile, isValidNationalId, normalizeAdmissionNumber, normalizeMobile, normalizeNationalId } from "./normalization";
 
 const uuid = z.string().uuid();
 
-export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must use YYYY-MM-DD format.").superRefine((value, context) => {
-  const [year, month, day] = value.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
-    context.addIssue({ code: "custom", message: "Date does not exist." });
-  }
-});
+export const dateSchema = isoDateSchema;
 
 const normalizedAdmissionNumber = z.string().trim().min(1).max(64).transform(normalizeAdmissionNumber);
 const normalizedNationalId = z.preprocess((value) => normalizeNationalId(typeof value === "string" ? value : null), z.string().regex(/^\d{10}$/, "National ID must contain 10 digits.").nullable());
