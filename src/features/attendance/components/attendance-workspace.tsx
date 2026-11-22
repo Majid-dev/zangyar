@@ -2,7 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react";
 
+import { ActionFeedback } from "@/components/ui/action-form";
 import { submitAttendanceAction } from "@/features/attendance/actions";
+import type { ActionState } from "@/lib/actions/result";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
@@ -22,7 +24,7 @@ const statusOptions: { value: AttendanceStatus; label: string; short: string; cl
 export function AttendanceWorkspace({ workspace }: { workspace: AttendanceWorkspaceData }) {
   const [students, setStudents] = useState(() => workspace.students.map((student) => ({ ...student, status: "PRESENT" as AttendanceStatus })));
   const [query, setQuery] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+  const [actionState, setActionState] = useState<ActionState<unknown>>(null);
   const [isPending, startTransition] = useTransition();
   const filtered = useMemo(() => students.filter((student) => student.name.includes(query) || student.code.includes(query)), [query, students]);
   const counts = useMemo(() => students.reduce<Record<AttendanceStatus, number>>((result, student) => ({ ...result, [student.status]: result[student.status] + 1 }), { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0 }), [students]);
@@ -30,14 +32,10 @@ export function AttendanceWorkspace({ workspace }: { workspace: AttendanceWorksp
   function setAll(status: AttendanceStatus) { setStudents((current) => current.map((student) => ({ ...student, status }))); }
   function setStatus(id: string, status: AttendanceStatus) { setStudents((current) => current.map((student) => student.id === id ? { ...student, status } : student)); }
   function save() {
-    setMessage(null);
+    setActionState(null);
     startTransition(async () => {
-      try {
-        await submitAttendanceAction({ classroomId: workspace.classroom?.classroom.id, businessDate: workspace.date, records: students.map(({ enrollmentId, status }) => ({ enrollmentId, status })) });
-        setMessage("حضور و غیاب با موفقیت ثبت شد.");
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : "ثبت حضور و غیاب انجام نشد.");
-      }
+      const result = await submitAttendanceAction({ classroomId: workspace.classroom?.classroom.id, businessDate: workspace.date, records: students.map(({ enrollmentId, status }) => ({ enrollmentId, status })) });
+      setActionState(result);
     });
   }
 
@@ -50,7 +48,7 @@ export function AttendanceWorkspace({ workspace }: { workspace: AttendanceWorksp
         <div className="hidden grid-cols-[minmax(0,1fr)_13rem] gap-3 bg-sage/50 px-5 py-2.5 text-xs font-bold text-muted sm:grid"><span>دانش‌آموز</span><span>وضعیت حضور</span></div>
         <div className="divide-y divide-border">{filtered.map((student, index) => <div key={student.id} className="grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_13rem] sm:items-center sm:px-5"><div className="flex min-w-0 items-center gap-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sage text-xs font-black text-primary tabular-nums">{index + 1}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-primary">{student.name}</p><p className="mt-0.5 text-xs text-muted">کد {student.code}</p></div></div><div className="grid grid-cols-4 gap-1.5" role="group" aria-label={`وضعیت حضور ${student.name}`}>{statusOptions.map((option) => <button key={option.value} type="button" aria-pressed={student.status === option.value} onClick={() => setStatus(student.id, option.value)} className={`min-h-9 rounded-lg border text-xs font-bold transition ${student.status === option.value ? option.className : "border-border bg-surface text-muted hover:bg-sage/60"}`}><span className="sm:hidden">{option.short}</span><span className="hidden sm:inline">{option.label}</span></button>)}</div></div>)}{filtered.length === 0 ? <div className="p-10 text-center text-sm text-muted">دانش‌آموزی با این جست‌وجو پیدا نشد.</div> : null}</div>
       </Panel>
-      <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start"><Panel><SectionHeading title="خلاصه ثبت" description="وضعیت انتخاب‌شده برای دانش‌آموزان." /><div className="mt-5 grid grid-cols-2 gap-2">{statusOptions.map((option) => <div key={option.value} className="rounded-xl bg-sage/60 p-3"><p className="text-xs text-muted">{option.label}</p><p className="mt-1 text-xl font-black tabular-nums text-primary">{counts[option.value]}</p></div>)}</div>{message ? <div className="mt-5 rounded-xl bg-sage p-3 text-xs leading-6 text-primary" role="status">{message}</div> : null}<Button type="button" className="mt-4 w-full" disabled={isPending || students.length === 0} onClick={save}>{isPending ? "در حال ثبت…" : "ثبت حضور و غیاب"}</Button></Panel></aside>
+      <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start"><Panel><SectionHeading title="خلاصه ثبت" description="وضعیت انتخاب‌شده برای دانش‌آموزان." /><div className="mt-5 grid grid-cols-2 gap-2">{statusOptions.map((option) => <div key={option.value} className="rounded-xl bg-sage/60 p-3"><p className="text-xs text-muted">{option.label}</p><p className="mt-1 text-xl font-black tabular-nums text-primary">{counts[option.value]}</p></div>)}</div><ActionFeedback state={actionState} /><Button type="button" className="mt-4 w-full" disabled={isPending || students.length === 0} onClick={save}>{isPending ? "در حال ثبت…" : "ثبت حضور و غیاب"}</Button></Panel></aside>
     </div>
   );
 }

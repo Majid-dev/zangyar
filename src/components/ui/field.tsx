@@ -1,14 +1,17 @@
 import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
+import { FieldErrors } from "./action-form";
+
 const controlClasses = "min-h-11 w-full rounded-xl border border-border bg-surface px-3.5 text-sm text-foreground outline-none transition placeholder:text-muted/70 focus:border-secondary focus:ring-4 focus:ring-secondary/10";
 
-type LabelProps = { label: string; hint?: string; children: React.ReactNode };
+type LabelProps = { label: string; hint?: string; name?: string; children: React.ReactNode };
 
-export function Field({ label, hint, children }: LabelProps) {
+export function Field({ label, hint, name, children }: LabelProps) {
   return (
     <label className="grid gap-2 text-sm font-bold text-primary">
       <span className="flex items-center justify-between gap-3">
-        {label}
+        <span>{label}</span>
+        {name ? <FieldErrors name={name} /> : null}
         {hint ? <span className="text-xs font-normal text-muted">{hint}</span> : null}
       </span>
       {children}
@@ -17,7 +20,7 @@ export function Field({ label, hint, children }: LabelProps) {
 }
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={`${controlClasses} ${props.className ?? ""}`} {...props} />;
+  return <input className={`${controlClasses} ${props.className ?? ""}`} aria-invalid={props["aria-invalid"] ?? undefined} {...props} />;
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {

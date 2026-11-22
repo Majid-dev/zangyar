@@ -12,9 +12,11 @@ import { normalizeAdmissionNumber, normalizeMobile, normalizeNationalId } from "
 import {
   closeEnrollmentSchema,
   createEnrollmentSchema,
+  createAndLinkGuardianSchema,
   createGuardianSchema,
   createStudentSchema,
   linkGuardianSchema,
+  registerStudentSchema,
   transitionGuardianSchema,
   transitionStudentSchema,
   transferEnrollmentSchema,
@@ -22,10 +24,12 @@ import {
   updateStudentGuardianSchema,
   updateStudentSchema,
   type CloseEnrollmentInput,
+  type CreateAndLinkGuardianInput,
   type CreateEnrollmentInput,
   type CreateGuardianInput,
   type CreateStudentInput,
   type LinkGuardianInput,
+  type RegisterStudentInput,
   type TransitionGuardianInput,
   type TransitionStudentInput,
   type TransferEnrollmentInput,
@@ -74,6 +78,60 @@ async function assertNoEnrollmentOverlap(tx: Parameters<Parameters<ReturnType<ty
 
 async function operationalContext(headers: Headers) {
   return requireStudentManagementAccess(headers);
+}
+
+export async function registerStudent(options: { headers: Headers; input: RegisterStudentInput }) {
+  const context = await operationalContext(options.headers);
+  const input = registerStudentSchema.parse(options.input);
+  const db = getDb();
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [student] = await tx.insert(students).values({
+        schoolId: context.schoolId,
+        admissionNumber: normalizeAdmissionNumber(input.student.admissionNumber),
+        firstName: input.student.firstName,
+        lastName: input.student.lastName,
+        nationalId: normalizeNationalId(input.student.nationalId),
+        birthDate: input.student.birthDate,
+      }).returning();
+
+      const linkedGuardians: Array<typeof studentGuardians.$inferSelect> = [];
+      for (const entry of input.guardians) {
+        let guardian: typeof guardians.$inferSelect | undefined;
+        const normalizedMobile = normalizeMobile(entry.normalizedMobile);
+        if (normalizedMobile) {
+          [guardian] = await tx.select().from(guardians).where(and(eq(guardians.schoolId, context.schoolId), eq(guardians.normalizedMobile, normalizedMobile), eq(guardians.status, "ACTIVE"))).limit(1);
+        }
+        if (!guardian) {
+          [guardian] = await tx.insert(guardians).values({ schoolId: context.schoolId, firstName: entry.firstName, lastName: entry.lastName, normalizedMobile, email: entry.email }).returning();
+        } else {
+          // Keep matching sibling contact stable. Fill missing optional details,
+          // but do not overwrite an existing contact with a different name/email.
+          const changes = {
+            email: guardian.email ?? entry.email ?? undefined,
+            updatedAt: new Date(),
+          };
+          [guardian] = await tx.update(guardians).set(changes).where(and(eq(guardians.id, guardian.id), eq(guardians.schoolId, context.schoolId))).returning();
+        }
+        const [relationship] = await tx.insert(studentGuardians).values({ schoolId: context.schoolId, studentId: student.id, guardianId: guardian.id, relationshipType: entry.relationshipType, isPrimary: entry.isPrimary, receivesSms: entry.receivesSms, isEmergency: entry.isEmergency }).returning();
+        linkedGuardians.push(relationship);
+      }
+
+      let enrollment: typeof enrollments.$inferSelect | null = null;
+      if (input.enrollment) {
+        await assertEnrollmentResources(tx, context.schoolId, { studentId: student.id, academicYearId: input.enrollment.academicYearId, classroomId: input.enrollment.classroomId });
+        await validateEnrollmentDates(tx, context.schoolId, input.enrollment);
+        await assertNoEnrollmentOverlap(tx, context.schoolId, { studentId: student.id, academicYearId: input.enrollment.academicYearId, startDate: input.enrollment.startDate, endDate: input.enrollment.endDate });
+        [enrollment] = await tx.insert(enrollments).values({ schoolId: context.schoolId, studentId: student.id, ...input.enrollment }).returning();
+      }
+
+      await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "STUDENT_REGISTERED", entityType: "STUDENT", entityId: student.id, metadata: { guardianCount: linkedGuardians.length, enrollmentId: enrollment?.id ?? null } });
+      return { student, guardians: linkedGuardians, enrollment };
+    });
+  } catch (error) {
+    return databaseConflict(error, "Student registration could not be completed.");
+  }
 }
 
 export async function createStudent(options: { headers: Headers; input: CreateStudentInput }) {
@@ -147,7 +205,7 @@ export async function createGuardian(options: { headers: Headers; input: CreateG
   const input = createGuardianSchema.parse(options.input);
   try {
     return await getDb().transaction(async (tx) => {
-      const [guardian] = await tx.insert(guardians).values({ schoolId: context.schoolId, firstName: input.firstName, lastName: input.lastName, normalizedMobile: normalizeMobile(input.normalizedMobile) }).returning();
+      const [guardian] = await tx.insert(guardians).values({ schoolId: context.schoolId, firstName: input.firstName, lastName: input.lastName, normalizedMobile: normalizeMobile(input.normalizedMobile), email: input.email }).returning();
       await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "GUARDIAN_CREATED", entityType: "GUARDIAN", entityId: guardian.id });
       return guardian;
     });
@@ -160,7 +218,7 @@ export async function updateGuardian(options: { headers: Headers; input: UpdateG
   const { guardianId, ...changes } = input;
   try {
     return await getDb().transaction(async (tx) => {
-      const [guardian] = await tx.update(guardians).set({ ...changes, normalizedMobile: changes.normalizedMobile === undefined ? undefined : normalizeMobile(changes.normalizedMobile), updatedAt: new Date() }).where(and(eq(guardians.id, guardianId), eq(guardians.schoolId, context.schoolId))).returning();
+      const [guardian] = await tx.update(guardians).set({ ...changes, normalizedMobile: changes.normalizedMobile === undefined ? undefined : normalizeMobile(changes.normalizedMobile), email: changes.email === undefined ? undefined : changes.email, updatedAt: new Date() }).where(and(eq(guardians.id, guardianId), eq(guardians.schoolId, context.schoolId))).returning();
       if (!guardian) throw new Error("Guardian not found.");
       await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "GUARDIAN_UPDATED", entityType: "GUARDIAN", entityId: guardian.id });
       return guardian;
@@ -176,6 +234,35 @@ export async function transitionGuardian(options: { headers: Headers; input: Tra
     if (!guardian) throw new Error("Guardian not found.");
     await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "GUARDIAN_STATUS_CHANGED", entityType: "GUARDIAN", entityId: guardian.id, metadata: { status: guardian.status } });
     return guardian;
+  });
+}
+
+export async function createAndLinkGuardian(options: { headers: Headers; input: CreateAndLinkGuardianInput }) {
+  const context = await operationalContext(options.headers);
+  const input = createAndLinkGuardianSchema.parse(options.input);
+  const normalizedMobile = normalizeMobile(input.normalizedMobile);
+
+  return getDb().transaction(async (tx) => {
+    const [student] = await tx.select().from(students).where(and(eq(students.id, input.studentId), eq(students.schoolId, context.schoolId))).limit(1);
+    if (!student) throw new Error("Student not found.");
+    let guardian: typeof guardians.$inferSelect | undefined;
+    if (normalizedMobile) {
+      [guardian] = await tx.select().from(guardians).where(and(eq(guardians.schoolId, context.schoolId), eq(guardians.normalizedMobile, normalizedMobile), eq(guardians.status, "ACTIVE"))).limit(1);
+    }
+    if (!guardian) {
+      [guardian] = await tx.insert(guardians).values({ schoolId: context.schoolId, firstName: input.firstName, lastName: input.lastName, normalizedMobile, email: input.email }).returning();
+    }
+    if (input.receivesSms && !guardian.normalizedMobile) throw new Error("SMS recipients require a guardian mobile.");
+    if (input.isPrimary) await tx.update(studentGuardians).set({ isPrimary: false, updatedAt: new Date() }).where(and(eq(studentGuardians.schoolId, context.schoolId), eq(studentGuardians.studentId, student.id)));
+    // A guardian already linked to this student is updated rather than inserted:
+    // the relationship is unique per (school, student, guardian), so a repeat
+    // submission means "change the flags", not "create a second link".
+    const [relationship] = await tx.insert(studentGuardians).values({ schoolId: context.schoolId, studentId: student.id, guardianId: guardian.id, relationshipType: input.relationshipType, isPrimary: input.isPrimary, receivesSms: input.receivesSms, isEmergency: input.isEmergency }).onConflictDoUpdate({
+      target: [studentGuardians.schoolId, studentGuardians.studentId, studentGuardians.guardianId],
+      set: { relationshipType: input.relationshipType, isPrimary: input.isPrimary, receivesSms: input.receivesSms, isEmergency: input.isEmergency, updatedAt: new Date() },
+    }).returning();
+    await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "STUDENT_GUARDIAN_LINKED", entityType: "STUDENT_GUARDIAN", entityId: `${student.id}:${guardian.id}` });
+    return { guardian, relationship };
   });
 }
 

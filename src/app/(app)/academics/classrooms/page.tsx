@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { AppPage } from "@/components/layout/app-shell";
 import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
@@ -9,8 +11,8 @@ import {
   listSubjectsForContext,
   listTeacherMembershipsForContext,
 } from "@/features/academics/queries";
+import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
 import { Panel, SectionHeading } from "@/components/ui/panel";
@@ -43,26 +45,26 @@ export default async function ClassroomsPage() {
           {years.length === 0 || grades.length === 0 ? (
             <p className="mt-5 text-sm leading-7 text-muted">برای ساخت کلاس، ابتدا یک سال تحصیلی و حداقل یک پایه ثبت کنید.</p>
           ) : (
-            <form action={createClassroomAction} className="mt-5 grid gap-4">
-              <Field label="سال تحصیلی">
+            <ActionForm action={createClassroomAction} className="mt-5 grid gap-4">
+              <Field label="سال تحصیلی" name="academicYearId">
                 <Select name="academicYearId" required defaultValue="">
                   <option value="" disabled>انتخاب سال تحصیلی</option>
                   {years.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}
                 </Select>
               </Field>
-              <Field label="پایه">
+              <Field label="پایه" name="gradeId">
                 <Select name="gradeId" required defaultValue="">
                   <option value="" disabled>انتخاب پایه</option>
                   {grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}
                 </Select>
               </Field>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="کد کلاس"><Input name="code" placeholder="A" required dir="ltr" className="text-start" /></Field>
-                <Field label="ظرفیت" hint="اختیاری"><Input name="capacity" type="number" min="1" dir="ltr" className="text-start" /></Field>
+                <Field label="کد کلاس" name="code"><Input name="code" placeholder="A" required dir="ltr" className="text-start" /></Field>
+                <Field label="ظرفیت" name="capacity" hint="اختیاری"><Input name="capacity" type="number" min="1" dir="ltr" className="text-start" /></Field>
               </div>
-              <Field label="نام کلاس"><Input name="name" placeholder="کلاس اول الف" required /></Field>
-              <div><Button type="submit" className="w-full">ایجاد کلاس</Button></div>
-            </form>
+              <Field label="نام کلاس" name="name"><Input name="name" placeholder="کلاس اول الف" required /></Field>
+              <div><SubmitButton className="w-full" pendingLabel="در حال ایجاد…">ایجاد کلاس</SubmitButton></div>
+            </ActionForm>
           )}
         </Panel>
 
@@ -75,6 +77,7 @@ export default async function ClassroomsPage() {
                 eyebrow={`ظرفیت ${classroom.capacity ?? "—"}`}
                 title={classroom.name}
                 description={`کد ${classroom.code} · ${assignments.length} تخصیص دبیر`}
+                action={<Link href={`/students?classroomId=${classroom.id}&academicYearId=${classroom.academicYearId}`} aria-label={`مشاهده دانش‌آموزان ${classroom.name}`} title="مشاهده دانش‌آموزان" className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-secondary/25 bg-secondary/10 px-3 text-xs font-bold text-secondary transition hover:bg-secondary/15"><span aria-hidden="true">◧</span>مشاهده دانش‌آموزان</Link>}
               />
 
               <div className="mt-5 divide-y divide-border border-t border-border">
@@ -100,28 +103,28 @@ export default async function ClassroomsPage() {
               {teachers.length === 0 ? (
                 <p className="mt-5 text-sm text-muted">برای تخصیص دبیر، ابتدا یک عضویت دبیر در مدرسه ثبت کنید.</p>
               ) : (
-                <form action={assignTeacherAction} className="mt-5 grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
+                <ActionForm action={assignTeacherAction} className="mt-5 grid gap-4 border-t border-border pt-5 sm:grid-cols-2">
                   <input type="hidden" name="classroomId" value={classroom.id} />
-                  <Field label="دبیر">
+                  <Field label="دبیر" name="teacherMembershipId">
                     <Select name="teacherMembershipId" required defaultValue="">
                       <option value="" disabled>انتخاب دبیر</option>
                       {teachers.map((teacher) => <option key={teacher.id} value={teacher.id}>{teacher.userName}</option>)}
                     </Select>
                   </Field>
-                  <Field label="درس" hint="اختیاری">
+                  <Field label="درس" name="subjectId" hint="اختیاری">
                     <Select name="subjectId" defaultValue="">
                       <option value="">همه درس‌ها</option>
                       {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
                     </Select>
                   </Field>
-                  <Field label="شروع تخصیص"><JalaliDatePicker name="startDate" required /></Field>
-                  <Field label="پایان" hint="اختیاری"><JalaliDatePicker name="endDate" /></Field>
+                  <Field label="شروع تخصیص" name="startDate"><JalaliDatePicker name="startDate" required /></Field>
+                  <Field label="پایان" name="endDate" hint="اختیاری"><JalaliDatePicker name="endDate" /></Field>
                   <label className="flex items-center gap-2 text-sm font-bold text-primary sm:col-span-2">
                     <input name="isPrimary" type="checkbox" className="size-4" />
                     دبیر اصلی کلاس
                   </label>
-                  <div className="sm:col-span-2"><Button type="submit" variant="secondary">تخصیص دبیر</Button></div>
-                </form>
+                  <div className="sm:col-span-2"><SubmitButton variant="secondary" pendingLabel="در حال تخصیص…">تخصیص دبیر</SubmitButton></div>
+                </ActionForm>
               )}
             </Panel>
           ))}

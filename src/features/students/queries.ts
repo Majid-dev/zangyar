@@ -28,20 +28,45 @@ export async function listStudents(options: { headers: Headers; filters?: Partia
 
 export async function listStudentsForContext(context: ActiveSchoolMembership, filters: StudentListFilter) {
   const db = getDb();
-  const search = filters.search ? `%${filters.search}%` : undefined;
-  const studentConditions = and(
-    eq(students.schoolId, context.schoolId),
-    filters.status ? eq(students.status, filters.status) : undefined,
-    search ? or(ilike(students.firstName, search), ilike(students.lastName, search), ilike(students.admissionNumber, search)) : undefined,
-  );
-  const enrollmentConditions = and(
+  const studentTerm = filters.name ?? filters.search;
+  const namePattern = studentTerm ? `%${studentTerm}%` : undefined;
+  const admissionPattern = filters.admission ? `%${filters.admission}%` : undefined;
+  const guardianPattern = filters.guardian ? `%${filters.guardian}%` : undefined;
+
+  // One effective enrollment per student: a student can hold an ACTIVE row for
+  // more than one academic year, and joining them all would repeat the student
+  // in the list and inflate the total. The most recent start date wins.
+  const effectiveEnrollment = db.selectDistinctOn([enrollments.studentId], {
+    studentId: enrollments.studentId,
+    id: enrollments.id,
+    classroomId: enrollments.classroomId,
+    academicYearId: enrollments.academicYearId,
+  }).from(enrollments).where(and(
     eq(enrollments.schoolId, context.schoolId),
-    eq(enrollments.studentId, students.id),
     eq(enrollments.status, "ACTIVE"),
     filters.classroomId ? eq(enrollments.classroomId, filters.classroomId) : undefined,
     filters.academicYearId ? eq(enrollments.academicYearId, filters.academicYearId) : undefined,
+  )).orderBy(asc(enrollments.studentId), desc(enrollments.startDate)).as("effective_enrollment");
+
+  const guardianJoinConditions = and(
+    eq(studentGuardians.studentId, students.id),
+    eq(studentGuardians.schoolId, context.schoolId),
+    eq(studentGuardians.isPrimary, true),
   );
-  const conditions = and(studentConditions, filters.classroomId || filters.academicYearId ? sql`${enrollments.id} is not null` : undefined);
+  const guardianFilter = guardianPattern ? or(ilike(guardians.firstName, guardianPattern), ilike(guardians.lastName, guardianPattern)) : undefined;
+  const enrollmentFilterRequested = Boolean(filters.classroomId || filters.academicYearId || filters.unenrolled);
+  const conditions = and(
+    eq(students.schoolId, context.schoolId),
+    filters.status ? eq(students.status, filters.status) : undefined,
+    namePattern ? or(ilike(students.firstName, namePattern), ilike(students.lastName, namePattern)) : undefined,
+    admissionPattern ? ilike(students.admissionNumber, admissionPattern) : undefined,
+    enrollmentFilterRequested
+      ? filters.unenrolled
+        ? sql`${effectiveEnrollment.id} is null`
+        : sql`${effectiveEnrollment.id} is not null`
+      : undefined,
+    guardianFilter,
+  );
 
   const [rows, totals] = await Promise.all([
     db.select({
@@ -52,17 +77,19 @@ export async function listStudentsForContext(context: ActiveSchoolMembership, fi
       guardianLastName: guardians.lastName,
       guardianMobile: guardians.normalizedMobile,
     }).from(students)
-      .leftJoin(enrollments, enrollmentConditions)
-      .leftJoin(classrooms, and(eq(classrooms.id, enrollments.classroomId), eq(classrooms.schoolId, context.schoolId)))
-      .leftJoin(academicYears, and(eq(academicYears.id, enrollments.academicYearId), eq(academicYears.schoolId, context.schoolId)))
-      .leftJoin(studentGuardians, and(eq(studentGuardians.studentId, students.id), eq(studentGuardians.schoolId, context.schoolId), eq(studentGuardians.isPrimary, true)))
+      .leftJoin(effectiveEnrollment, eq(effectiveEnrollment.studentId, students.id))
+      .leftJoin(classrooms, and(eq(classrooms.id, effectiveEnrollment.classroomId), eq(classrooms.schoolId, context.schoolId)))
+      .leftJoin(academicYears, and(eq(academicYears.id, effectiveEnrollment.academicYearId), eq(academicYears.schoolId, context.schoolId)))
+      .leftJoin(studentGuardians, guardianJoinConditions)
       .leftJoin(guardians, and(eq(guardians.id, studentGuardians.guardianId), eq(guardians.schoolId, context.schoolId), eq(guardians.status, "ACTIVE")))
       .where(conditions)
-      .orderBy(asc(students.lastName), asc(students.firstName), asc(students.admissionNumber), asc(students.id))
+      .orderBy(...orderFor(filters.sort, filters.dir))
       .limit(filters.pageSize)
       .offset((filters.page - 1) * filters.pageSize),
     db.select({ total: count() }).from(students)
-      .leftJoin(enrollments, enrollmentConditions)
+      .leftJoin(effectiveEnrollment, eq(effectiveEnrollment.studentId, students.id))
+      .leftJoin(studentGuardians, guardianJoinConditions)
+      .leftJoin(guardians, and(eq(guardians.id, studentGuardians.guardianId), eq(guardians.schoolId, context.schoolId), eq(guardians.status, "ACTIVE")))
       .where(conditions),
   ]);
 
@@ -82,6 +109,22 @@ export async function listStudentsForContext(context: ActiveSchoolMembership, fi
     page: filters.page,
     pageSize: filters.pageSize,
   };
+}
+
+/**
+ * Sort columns are whitelisted by the filter schema, so this maps a validated
+ * key to a SQL column and never interpolates unsanitized input. `students.id`
+ * is always the final tiebreaker so pagination cannot drop or repeat a row.
+ */
+function orderFor(sort: StudentListFilter["sort"], dir: StudentListFilter["dir"]) {
+  const direction = dir === "desc" ? desc : asc;
+  switch (sort) {
+    case "admission": return [direction(students.admissionNumber), asc(students.id)];
+    case "classroom": return [direction(classrooms.name), asc(students.lastName), asc(students.id)];
+    case "guardian": return [direction(guardians.lastName), asc(students.lastName), asc(students.id)];
+    case "status": return [direction(students.status), asc(students.lastName), asc(students.id)];
+    default: return [direction(students.lastName), direction(students.firstName), asc(students.id)];
+  }
 }
 
 export async function getStudent(options: { headers: Headers; studentId: string }) {

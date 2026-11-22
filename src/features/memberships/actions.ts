@@ -1,16 +1,31 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
+
+import { executeAction } from "@/lib/actions/execute";
+import type { ActionResult } from "@/lib/actions/result";
 
 import { createMembership, updateMembershipStatus } from "./services";
 import { createMembershipSchema, updateMembershipStatusSchema } from "./schema";
 
-export async function createMembershipAction(input: unknown) {
-  const parsed = createMembershipSchema.parse(input);
-  return createMembership({ headers: await headers(), input: parsed });
+function revalidateMemberships() {
+  revalidatePath("/settings/members");
+  revalidatePath("/dashboard");
 }
 
-export async function updateMembershipStatusAction(input: unknown) {
-  const parsed = updateMembershipStatusSchema.parse(input);
-  return updateMembershipStatus({ headers: await headers(), input: parsed });
+export async function createMembershipAction(input: unknown): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await createMembership({ headers: await headers(), input: createMembershipSchema.parse(input) });
+    revalidateMemberships();
+    return result;
+  }, "عضویت مدرسه ایجاد شد.");
+}
+
+export async function updateMembershipStatusAction(input: unknown): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await updateMembershipStatus({ headers: await headers(), input: updateMembershipStatusSchema.parse(input) });
+    revalidateMemberships();
+    return result;
+  }, "وضعیت عضویت تغییر کرد.");
 }
