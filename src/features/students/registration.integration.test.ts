@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { academicYears, classrooms, enrollments, grades, guardians, schoolMemberships, schools, studentGuardians, students } from "@/lib/db/schema";
 import { createAndLinkGuardian, createEnrollment, registerStudent } from "./services";
+import { listStudentsForContext } from "./queries";
 
 config({ path: ".env.local" });
 const canRun = Boolean(process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL && process.env.RUN_DB_INTEGRATION_TESTS === "1");
@@ -155,10 +156,14 @@ describe.skipIf(!canRun)("persisted student registration workflow", () => {
     expect(profilesAfter).toHaveLength(profilesBefore.length);
   });
 
-  it("keeps other-school students out of tenant-scoped reads", async () => {
+  it("filters student list by independent columns without leaking another tenant", async () => {
     const [foreign] = await getDb().insert(students).values({ schoolId: otherSchoolId, admissionNumber: "9001", firstName: "بیگانه", lastName: "خارجی" }).returning();
-    const scoped = await getDb().select().from(students).where(eq(students.schoolId, schoolId));
-    expect(scoped.some((row) => row.id === foreign.id)).toBe(false);
+    const [school] = await getDb().select().from(schools).where(eq(schools.id, schoolId));
+    const membership = (await getDb().select().from(schoolMemberships).where(and(eq(schoolMemberships.schoolId, schoolId), eq(schoolMemberships.userId, admin.id))))[0];
+    const context = { membershipId: membership.id, schoolId, userId: admin.id, role: "SCHOOL_ADMIN" as const, school };
+    const filtered = await listStudentsForContext(context, { name: "آرین", admission: "1001", guardian: "مریم", sort: "name", dir: "asc", unenrolled: false, page: 1, pageSize: 25 });
+    expect(filtered.rows.some((row) => row.firstName === "آرین" && row.admissionNumber === "1001")).toBe(true);
+    expect(filtered.rows.some((row) => row.id === foreign.id)).toBe(false);
   });
 
   it("rejects registration from an account without school membership", async () => {

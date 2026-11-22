@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
+import { GuardianRelationshipField } from "./guardian-relationship-field";
 import type { ActionState } from "@/lib/actions/result";
 import { formatPersianDate } from "@/lib/date";
 import {
@@ -41,7 +42,7 @@ export function StudentProfileCard({ student }: { student: { id: string; admissi
       <ActionForm action={updateStudentAction} className="grid gap-4 sm:grid-cols-2">
         <input type="hidden" name="studentId" value={student.id} />
         <Field label="شماره دانش‌آموزی"><Input name="admissionNumber" defaultValue={student.admissionNumber} required /></Field>
-        <Field label="کد ملی" hint="اختیاری"><Input name="nationalId" defaultValue={student.nationalId ?? ""} inputMode="numeric" dir="ltr" className="text-start" /></Field>
+        <Field label="کد ملی" hint="اختیاری"><Input name="nationalId" defaultValue={student.nationalId ?? ""} inputMode="numeric" className="text-start" /></Field>
         <Field label="نام"><Input name="firstName" defaultValue={student.firstName} required /></Field>
         <Field label="نام خانوادگی"><Input name="lastName" defaultValue={student.lastName} required /></Field>
         <Field label="تاریخ تولد" hint="اختیاری"><JalaliDatePicker name="birthDate" defaultValue={student.birthDate} /></Field>
@@ -118,7 +119,7 @@ export function GuardianPanel({ studentId, guardians }: { studentId: string; gua
                 <ActionForm action={updateStudentGuardianAction} className="flex flex-wrap items-end gap-3">
                   <input type="hidden" name="studentId" value={studentId} />
                   <input type="hidden" name="guardianId" value={guardian.id} />
-                  <Field label="رابطه"><Input name="relationshipType" defaultValue={guardian.relationshipType} required className="min-h-9 w-36 text-xs" /></Field>
+                  <GuardianRelationshipField label="رابطه" name="relationshipType" value={guardian.relationshipType} />
                   <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="isPrimary" defaultChecked={guardian.isPrimary} className="size-4" /> اصلی</label>
                   <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="receivesSms" defaultChecked={guardian.receivesSms} className="size-4" /> پیامک</label>
                   <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="isEmergency" defaultChecked={guardian.isEmergency} className="size-4" /> اضطراری</label>
@@ -178,7 +179,7 @@ function LinkGuardianForm({ studentId, existingCount }: { studentId: string; exi
         <Field label="نام"><Input name="firstName" required /></Field>
         <Field label="نام خانوادگی"><Input name="lastName" required /></Field>
         <Field label="شماره همراه" hint="برای پیامک لازم است"><Input name="normalizedMobile" inputMode="tel" dir="ltr" className="text-start" /></Field>
-        <Field label="رابطه"><Input name="relationshipType" placeholder="مادر، پدر، سرپرست…" required /></Field>
+        <GuardianRelationshipField label="رابطه" />
         <label className="flex items-center gap-2 text-xs font-bold text-primary"><input type="checkbox" name="isPrimary" defaultChecked={existingCount === 0} className="size-4" /> ولی اصلی</label>
         <label className="flex items-center gap-2 text-xs font-bold text-primary"><input type="checkbox" name="receivesSms" defaultChecked className="size-4" /> دریافت پیامک</label>
         <div className="sm:col-span-2"><SubmitButton size="sm" pendingLabel="در حال افزودن…">افزودن ولی</SubmitButton></div>

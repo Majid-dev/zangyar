@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { AppPage } from "@/components/layout/app-shell";
 import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
@@ -75,6 +77,7 @@ export default async function ClassroomsPage() {
                 eyebrow={`ظرفیت ${classroom.capacity ?? "—"}`}
                 title={classroom.name}
                 description={`کد ${classroom.code} · ${assignments.length} تخصیص دبیر`}
+                action={<Link href={`/students?classroomId=${classroom.id}&academicYearId=${classroom.academicYearId}`} aria-label={`مشاهده دانش‌آموزان ${classroom.name}`} title="مشاهده دانش‌آموزان" className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-secondary/25 bg-secondary/10 px-3 text-xs font-bold text-secondary transition hover:bg-secondary/15"><span aria-hidden="true">◧</span>مشاهده دانش‌آموزان</Link>}
               />
 
               <div className="mt-5 divide-y divide-border border-t border-border">

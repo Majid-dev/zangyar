@@ -104,6 +104,19 @@ describe("createAndLinkGuardianSchema", () => {
     const parsed = createAndLinkGuardianSchema.parse({ studentId: uuidA, firstName: "م", lastName: "ا", normalizedMobile: "09120000001", relationshipType: "مادر", isPrimary: true, receivesSms: true, isEmergency: false });
     expect(parsed).toMatchObject({ studentId: uuidA, isPrimary: true, receivesSms: true });
   });
+
+  it("still accepts a preset relationship and a custom one", () => {
+    const base = { studentId: uuidA, firstName: "م", lastName: "ا", normalizedMobile: "09120000001", isPrimary: false, receivesSms: true, isEmergency: false };
+    expect(createAndLinkGuardianSchema.parse({ ...base, relationshipType: "سرپرست قانونی" }).relationshipType).toBe("سرپرست قانونی");
+    expect(createAndLinkGuardianSchema.parse({ ...base, relationshipType: "قیم شرعی" }).relationshipType).toBe("قیم شرعی");
+  });
+
+  it("does not invalidate a relationship saved before the preset list existed", () => {
+    const parsed = registerStudentSchema.parse(registration({
+      guardians: [{ firstName: "م", lastName: "ا", normalizedMobile: "09120000001", relationshipType: "قیم", isPrimary: true, receivesSms: true, isEmergency: false }],
+    }));
+    expect(parsed.guardians[0].relationshipType).toBe("قیم");
+  });
 });
 
 describe("studentListFilterSchema", () => {
@@ -114,5 +127,21 @@ describe("studentListFilterSchema", () => {
 
   it("defaults the unenrolled flag to false", () => {
     expect(studentListFilterSchema.parse({}).unenrolled).toBe(false);
+  });
+
+  it("accepts each supported sort field and defaults to name ascending", () => {
+    for (const sort of ["name", "admission", "classroom", "guardian", "status"]) {
+      expect(studentListFilterSchema.parse({ sort, dir: "desc" })).toMatchObject({ sort, dir: "desc" });
+    }
+    expect(studentListFilterSchema.parse({})).toMatchObject({ sort: "name", dir: "asc" });
+  });
+
+  it("rejects an unknown sort field instead of passing it to SQL", () => {
+    expect(studentListFilterSchema.safeParse({ sort: "students.password" }).success).toBe(false);
+  });
+
+  it("keeps the per-column filters independent", () => {
+    const parsed = studentListFilterSchema.parse({ name: " آرین ", admission: "12", guardian: "احمدی" });
+    expect(parsed).toMatchObject({ name: "آرین", admission: "12", guardian: "احمدی" });
   });
 });

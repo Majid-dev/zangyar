@@ -36,6 +36,11 @@ export const createGuardianSchema = z.object({
 export const updateGuardianSchema = createGuardianSchema.partial().extend({ guardianId: uuid });
 export const transitionGuardianSchema = z.object({ guardianId: uuid, status: z.enum(["ACTIVE", "ARCHIVED"]) });
 
+/**
+ * A relationship is either a known preset or the free-text value behind `سایر`.
+ * The upper bound is the stored column width, so a legacy custom value stays
+ * valid and is never rejected on edit.
+ */
 const relationshipType = z.string().trim().min(1).max(64);
 export const linkGuardianSchema = z.object({
   studentId: uuid,
@@ -79,13 +84,23 @@ export const transferEnrollmentSchema = z.object({
 });
 export const closeEnrollmentSchema = z.object({ enrollmentId: uuid, endDate: dateSchema });
 
+export const studentSortFieldSchema = z.enum(["name", "admission", "classroom", "guardian", "status"]);
+export const sortDirectionSchema = z.enum(["asc", "desc"]);
+
 export const studentListFilterSchema = z.object({
+  /** Column-wise filters: each one maps to the field its column displays. */
+  name: z.string().trim().max(100).optional(),
+  admission: z.string().trim().max(100).optional(),
+  guardian: z.string().trim().max(100).optional(),
+  /** Legacy combined term kept so existing links keep working. */
   search: z.string().trim().max(100).optional(),
   status: studentStatusSchema.optional(),
   classroomId: uuid.optional(),
   academicYearId: uuid.optional(),
   // Explicit literal mapping: z.coerce.boolean() would read the string "false" as true.
   unenrolled: z.preprocess((value) => value === true || value === "true" || value === "1", z.boolean()).default(false),
+  sort: studentSortFieldSchema.default("name"),
+  dir: sortDirectionSchema.default("asc"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });

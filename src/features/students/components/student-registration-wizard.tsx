@@ -7,6 +7,7 @@ import { ActionFeedback, ActionFieldErrorsProvider, FieldErrors } from "@/compon
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
+import { GuardianRelationshipField } from "./guardian-relationship-field";
 import type { ActionState } from "@/lib/actions/result";
 import { formatPersianDate } from "@/lib/date";
 import { registerStudentAction } from "../actions";
@@ -132,7 +133,7 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
                   <Field label="نام خانوادگی"><Input value={guardian.lastName} onChange={(event) => updateGuardian(index, { lastName: event.target.value })} /></Field>
                   <Field label="شماره همراه" hint="برای پیامک لازم است"><Input value={guardian.normalizedMobile ?? ""} onChange={(event) => updateGuardian(index, { normalizedMobile: event.target.value || null })} inputMode="tel" dir="ltr" className="text-start" /><FieldErrors name={`guardians.${index}.normalizedMobile`} /></Field>
                   <Field label="ایمیل" hint="اختیاری"><Input value={guardian.email ?? ""} onChange={(event) => updateGuardian(index, { email: event.target.value || null })} type="email" dir="ltr" className="text-start" /><FieldErrors name={`guardians.${index}.email`} /></Field>
-                  <Field label="رابطه با دانش‌آموز"><Input value={guardian.relationshipType} onChange={(event) => updateGuardian(index, { relationshipType: event.target.value })} placeholder="مادر، پدر، سرپرست…" /></Field>
+                  <GuardianRelationshipField label="رابطه با دانش‌آموز" name={`guardians.${index}.relationshipType`} value={guardian.relationshipType} onValueChange={(value) => updateGuardian(index, { relationshipType: value })} />
                   <div className="flex flex-wrap items-end gap-4 pb-2 text-xs font-bold text-primary sm:col-span-2"><label className="flex items-center gap-2"><input type="checkbox" checked={guardian.isPrimary} onChange={(event) => setGuardians((current) => current.map((item, currentIndex) => ({ ...item, isPrimary: currentIndex === index ? event.target.checked : false })))} className="size-4" /> ولی اصلی</label><label className="flex items-center gap-2"><input type="checkbox" checked={guardian.receivesSms} onChange={(event) => updateGuardian(index, { receivesSms: event.target.checked })} className="size-4" /> دریافت پیامک</label><label className="flex items-center gap-2"><input type="checkbox" checked={guardian.isEmergency} onChange={(event) => updateGuardian(index, { isEmergency: event.target.checked })} className="size-4" /> تماس اضطراری</label></div>
                 </div>
               </div>
