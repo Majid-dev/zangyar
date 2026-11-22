@@ -11,6 +11,14 @@ export type FormAction = (previousState: ActionState<unknown>, formData: FormDat
 
 const FieldErrorsContext = createContext<ActionFailure["fieldErrors"] | undefined>(undefined);
 
+/**
+ * Lets a custom multi-step form (one that does not use `ActionForm`) publish
+ * server-side field errors to the same `FieldErrors` consumers.
+ */
+export function ActionFieldErrorsProvider({ fieldErrors, children }: { fieldErrors: ActionFailure["fieldErrors"]; children: React.ReactNode }) {
+  return <FieldErrorsContext.Provider value={fieldErrors}>{children}</FieldErrorsContext.Provider>;
+}
+
 export function ActionForm({ action, children, className }: { action: FormAction; children: React.ReactNode; className?: string }) {
   const [state, formAction] = useActionState(action, null);
   const fieldErrors = state && !state.ok ? state.fieldErrors : undefined;

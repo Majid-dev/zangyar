@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { ActionFeedback } from "@/components/ui/action-form";
+import { ActionFeedback, ActionFieldErrorsProvider, FieldErrors } from "@/components/ui/action-form";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
@@ -37,6 +37,7 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
   const availableClassrooms = useMemo(() => classrooms.filter((classroom) => classroom.academicYearId === academicYearId), [academicYearId, classrooms]);
   const selectedYear = activeYears.find((year) => year.id === academicYearId);
   const selectedClassroom = availableClassrooms.find((classroom) => classroom.id === classroomId);
+  const fieldErrors = state && !state.ok ? state.fieldErrors : undefined;
 
   function updateStudent<K extends keyof RegisterStudentInput["student"]>(key: K, value: RegisterStudentInput["student"][K]) {
     setStudent((current) => ({ ...current, [key]: value }));
@@ -73,6 +74,16 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
         enrollment: { academicYearId, classroomId, startDate, endDate: null },
       });
       setState(result);
+      // A server-side failure may belong to an earlier step. Move to the step
+      // that owns the first reported field so its message is actually visible.
+      if (!result.ok && result.fieldErrors) {
+        const fields = Object.keys(result.fieldErrors);
+        const owner = fields.some((field) => field.startsWith("student")) ? 0
+          : fields.some((field) => field.startsWith("guardians")) ? 1
+            : fields.some((field) => field.startsWith("enrollment")) ? 2
+              : null;
+        if (owner !== null) setStep(owner);
+      }
       if (result.ok && "studentId" in result.data) {
         window.setTimeout(() => router.push(`/students/${result.data.studentId}`), 900);
       }
@@ -94,6 +105,7 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
         </ol>
       </nav>
 
+      <ActionFieldErrorsProvider fieldErrors={fieldErrors}>
       <section className="order-1 min-w-0 rounded-2xl border border-border bg-surface p-5 shadow-[0_8px_24px_rgba(23,59,87,0.04)] lg:order-2 sm:p-6">
         <div className="mb-6 flex items-start justify-between gap-4 border-b border-border pb-5">
           <div><p className="text-xs font-bold text-secondary">گام {step + 1} از {steps.length}</p><h2 className="mt-1 text-xl font-black text-primary">{steps[step]}</h2></div>
@@ -118,8 +130,8 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="نام"><Input value={guardian.firstName} onChange={(event) => updateGuardian(index, { firstName: event.target.value })} /></Field>
                   <Field label="نام خانوادگی"><Input value={guardian.lastName} onChange={(event) => updateGuardian(index, { lastName: event.target.value })} /></Field>
-                  <Field label="شماره همراه" hint="برای پیامک لازم است"><Input value={guardian.normalizedMobile ?? ""} onChange={(event) => updateGuardian(index, { normalizedMobile: event.target.value || null })} inputMode="tel" dir="ltr" className="text-start" /></Field>
-                  <Field label="ایمیل" hint="اختیاری"><Input value={guardian.email ?? ""} onChange={(event) => updateGuardian(index, { email: event.target.value || null })} type="email" dir="ltr" className="text-start" /></Field>
+                  <Field label="شماره همراه" hint="برای پیامک لازم است"><Input value={guardian.normalizedMobile ?? ""} onChange={(event) => updateGuardian(index, { normalizedMobile: event.target.value || null })} inputMode="tel" dir="ltr" className="text-start" /><FieldErrors name={`guardians.${index}.normalizedMobile`} /></Field>
+                  <Field label="ایمیل" hint="اختیاری"><Input value={guardian.email ?? ""} onChange={(event) => updateGuardian(index, { email: event.target.value || null })} type="email" dir="ltr" className="text-start" /><FieldErrors name={`guardians.${index}.email`} /></Field>
                   <Field label="رابطه با دانش‌آموز"><Input value={guardian.relationshipType} onChange={(event) => updateGuardian(index, { relationshipType: event.target.value })} placeholder="مادر، پدر، سرپرست…" /></Field>
                   <div className="flex flex-wrap items-end gap-4 pb-2 text-xs font-bold text-primary sm:col-span-2"><label className="flex items-center gap-2"><input type="checkbox" checked={guardian.isPrimary} onChange={(event) => setGuardians((current) => current.map((item, currentIndex) => ({ ...item, isPrimary: currentIndex === index ? event.target.checked : false })))} className="size-4" /> ولی اصلی</label><label className="flex items-center gap-2"><input type="checkbox" checked={guardian.receivesSms} onChange={(event) => updateGuardian(index, { receivesSms: event.target.checked })} className="size-4" /> دریافت پیامک</label><label className="flex items-center gap-2"><input type="checkbox" checked={guardian.isEmergency} onChange={(event) => updateGuardian(index, { isEmergency: event.target.checked })} className="size-4" /> تماس اضطراری</label></div>
                 </div>
@@ -153,6 +165,7 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
           {step < 3 ? <Button type="button" onClick={next} disabled={isPending}>مرحله بعد</Button> : <Button type="button" onClick={submit} disabled={isPending || !startDate}>{isPending ? "در حال ثبت پرونده…" : "ثبت نهایی پرونده"}</Button>}
         </div>
       </section>
+      </ActionFieldErrorsProvider>
     </div>
   );
 }
