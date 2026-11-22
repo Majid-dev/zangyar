@@ -2,65 +2,86 @@ import { AppPage } from "@/components/layout/app-shell";
 import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
 import { getStudentForContext, listStudentEnrollmentsForContext, listStudentGuardiansForContext } from "@/features/students/queries";
-import { Badge } from "@/components/ui/badge";
+import { listAcademicYearsForContext, listClassroomsForContext } from "@/features/academics/queries";
+import { EnrollmentPanel, GuardianPanel, StudentProfileCard } from "@/features/students/components/student-profile-panels";
 import { Panel, SectionHeading } from "@/components/ui/panel";
-import { formatPersianDate } from "@/lib/date";
-
-const statusLabels = { ACTIVE: "فعال", WITHDRAWN: "ترک‌تحصیل", GRADUATED: "فارغ‌التحصیل", ARCHIVED: "بایگانی‌شده" } as const;
 
 export default async function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const access = await requirePageAccess(["SCHOOL_ADMIN"]);
   if (access.blocked) return access.blocked;
   const { id } = await params;
   const student = await getStudentForContext(access.context, id);
-  const [guardians, enrollments] = await Promise.all([
+  const [guardianRows, enrollmentRows, years, classrooms] = await Promise.all([
     listStudentGuardiansForContext(access.context, student.id),
     listStudentEnrollmentsForContext(access.context, student.id),
+    listAcademicYearsForContext(access.context),
+    listClassroomsForContext(access.context),
   ]);
+
+  const activeYears = years.filter((year) => year.status === "ACTIVE");
+  const activeYearId = activeYears[0]?.id ?? null;
+  // Only ACTIVE enrollments block re-enrollment; the partial exclusion constraint
+  // in the database enforces the same rule, so surface the state before submit.
+  const enrolledActiveYear = enrollmentRows.some(({ enrollment, academicYear }) => academicYear.status === "ACTIVE" && enrollment.status === "ACTIVE");
 
   return (
     <AppPage>
       <PageHeader
         breadcrumbs={[{ label: "داشبورد", href: "/dashboard" }, { label: "دانش‌آموزان", href: "/students" }, { label: `${student.firstName} ${student.lastName}` }]}
         title={`${student.firstName} ${student.lastName}`}
-        description={`کد دانش‌آموزی ${student.admissionNumber}`}
+        description={`کد دانش‌آموزی ${student.admissionNumber} · پرونده مستقل از ثبت‌نام هر سال تحصیلی`}
         action={<BackLink href="/students">بازگشت به دانش‌آموزان</BackLink>}
       />
-      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-4">
           <Panel>
-            <SectionHeading title="اطلاعات پایه" />
-            <dl className="mt-5 grid gap-4 sm:grid-cols-3">
-              <div><dt className="text-xs text-muted">وضعیت</dt><dd className="mt-1"><Badge tone={student.status === "ACTIVE" ? "success" : "warning"}>{statusLabels[student.status]}</Badge></dd></div>
-              <div><dt className="text-xs text-muted">کد ملی</dt><dd className="mt-1 text-sm font-bold text-primary">{student.nationalId ?? "ثبت نشده"}</dd></div>
-              <div><dt className="text-xs text-muted">تاریخ تولد</dt><dd className="mt-1 text-sm font-bold text-primary">{student.birthDate ? formatPersianDate(student.birthDate) : "ثبت نشده"}</dd></div>
-            </dl>
+            <SectionHeading title="اطلاعات پایه" description="پرونده‌ی هویتی دانش‌آموز؛ در همه‌ی سال‌های تحصیلی مشترک است." />
+            <div className="mt-5">
+              <StudentProfileCard student={{ id: student.id, admissionNumber: student.admissionNumber, firstName: student.firstName, lastName: student.lastName, nationalId: student.nationalId, birthDate: student.birthDate, status: student.status }} />
+            </div>
           </Panel>
+
           <Panel>
-            <SectionHeading title="تاریخچه ثبت‌نام" description="بازه‌های مؤثر کلاس و سال تحصیلی." />
-            <div className="mt-5 divide-y divide-border">
-              {enrollments.length === 0 ? <p className="text-sm text-muted">ثبت‌نامی ثبت نشده است.</p> : enrollments.map(({ enrollment, classroom, academicYear }) => (
-                <div key={enrollment.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0">
-                  <div>
-                    <p className="text-sm font-bold text-primary">{classroom.name}</p>
-                    <p className="mt-1 text-xs text-muted">{academicYear.name} · {formatPersianDate(enrollment.startDate)} تا {enrollment.endDate ? formatPersianDate(enrollment.endDate) : "اکنون"}</p>
-                  </div>
-                  <Badge tone={enrollment.status === "ACTIVE" ? "success" : "neutral"}>{enrollment.status === "ACTIVE" ? "فعال" : "بسته"}</Badge>
-                </div>
-              ))}
+            <SectionHeading title="ثبت‌نام تحصیلی" description="هر ثبت‌نام به یک سال تحصیلی و کلاس وابسته است و در طول زمان حفظ می‌شود." />
+            <div className="mt-5">
+              <EnrollmentPanel
+                studentId={student.id}
+                years={activeYears.map((year) => ({ id: year.id, name: year.name }))}
+                classrooms={classrooms.map((classroom) => ({ id: classroom.id, name: classroom.name, academicYearId: classroom.academicYearId }))}
+                enrollments={enrollmentRows.map(({ enrollment, classroom, academicYear }) => ({
+                  id: enrollment.id,
+                  classroomName: classroom.name,
+                  academicYearName: academicYear.name,
+                  startDate: enrollment.startDate,
+                  endDate: enrollment.endDate,
+                  status: enrollment.status,
+                }))}
+                activeYearId={activeYearId}
+                unenrolledActiveYear={Boolean(activeYearId) && !enrolledActiveYear}
+              />
             </div>
           </Panel>
         </div>
-        <Panel>
-          <SectionHeading title="اولیا" description="اطلاعات تماس این پرونده." />
-          <div className="mt-5 space-y-4">
-            {guardians.length === 0 ? <p className="text-sm text-muted">ولی ثبت نشده است.</p> : guardians.map(({ guardian, relationship }) => (
-              <div key={guardian.id} className="border-b border-border pb-3 last:border-0 last:pb-0">
-                <p className="text-sm font-bold text-primary">{guardian.firstName} {guardian.lastName}</p>
-                <p className="mt-1 text-xs text-muted">{relationship.relationshipType ?? "رابطه ثبت نشده"}</p>
-                <p className="mt-1 text-xs text-muted">{guardian.normalizedMobile ?? "شماره ثبت نشده"}</p>
-              </div>
-            ))}
+
+        <Panel className="self-start">
+          <SectionHeading title="اولیا" description="هر دانش‌آموز می‌تواند چند ولی داشته باشد؛ یک ولی می‌تواند برای چند دانش‌آموز ثبت شود." />
+          <div className="mt-5">
+            <GuardianPanel
+              studentId={student.id}
+              guardians={guardianRows.map(({ guardian, relationship }) => ({
+                id: guardian.id,
+                firstName: guardian.firstName,
+                lastName: guardian.lastName,
+                normalizedMobile: guardian.normalizedMobile,
+                email: guardian.email,
+                status: guardian.status,
+                relationshipType: relationship.relationshipType,
+                isPrimary: relationship.isPrimary,
+                receivesSms: relationship.receivesSms,
+                isEmergency: relationship.isEmergency,
+              }))}
+            />
           </div>
         </Panel>
       </div>

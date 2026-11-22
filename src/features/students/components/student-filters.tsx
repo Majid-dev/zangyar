@@ -6,12 +6,13 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 
-export function StudentFilters({ search = "", status = "" }: { search?: string; status?: string }) {
+export function StudentFilters({ search = "", status = "", unenrolled = false, academicYearId = "" }: { search?: string; status?: string; unenrolled?: boolean; academicYearId?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(search);
   const [selectedStatus, setSelectedStatus] = useState(status);
+  const [onlyUnenrolled, setOnlyUnenrolled] = useState(unenrolled);
   const [isPending, startTransition] = useTransition();
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -21,6 +22,15 @@ export function StudentFilters({ search = "", status = "" }: { search?: string; 
     else params.delete("search");
     if (selectedStatus) params.set("status", selectedStatus);
     else params.delete("status");
+    // "not enrolled in the active year" is the enrollment filter, so keeping the
+    // year in the URL is what makes the flag meaningful across pagination.
+    if (onlyUnenrolled && academicYearId) {
+      params.set("unenrolled", "true");
+      params.set("academicYearId", academicYearId);
+    } else {
+      params.delete("unenrolled");
+      params.delete("academicYearId");
+    }
     params.delete("page");
 
     startTransition(() => {
@@ -41,6 +51,10 @@ export function StudentFilters({ search = "", status = "" }: { search?: string; 
         <option value="GRADUATED">فارغ‌التحصیل</option>
         <option value="ARCHIVED">بایگانی‌شده</option>
       </Select>
+      <label className="flex shrink-0 items-center gap-2 rounded-xl border border-border px-3 text-xs font-bold text-primary">
+        <input type="checkbox" checked={onlyUnenrolled} onChange={(event) => setOnlyUnenrolled(event.target.checked)} className="size-4" disabled={!academicYearId} />
+        بدون ثبت‌نام سال فعال
+      </label>
       <Button type="submit" size="sm" variant="secondary" disabled={isPending}>
         {isPending ? "در حال جست‌وجو…" : "جست‌وجو"}
       </Button>

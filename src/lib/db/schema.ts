@@ -261,6 +261,7 @@ export const guardians = pgTable("guardians", {
   firstName: varchar("first_name", { length: 100 }).notNull(),
   lastName: varchar("last_name", { length: 100 }).notNull(),
   normalizedMobile: varchar("normalized_mobile", { length: 20 }),
+  email: varchar("email", { length: 320 }),
   status: recordStatus("status").default("ACTIVE").notNull(),
   ...timestamps,
 }, (table) => [

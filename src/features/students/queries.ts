@@ -41,7 +41,15 @@ export async function listStudentsForContext(context: ActiveSchoolMembership, fi
     filters.classroomId ? eq(enrollments.classroomId, filters.classroomId) : undefined,
     filters.academicYearId ? eq(enrollments.academicYearId, filters.academicYearId) : undefined,
   );
-  const conditions = and(studentConditions, filters.classroomId || filters.academicYearId ? sql`${enrollments.id} is not null` : undefined);
+  const enrollmentFilterRequested = Boolean(filters.classroomId || filters.academicYearId || filters.unenrolled);
+  const conditions = and(
+    studentConditions,
+    enrollmentFilterRequested
+      ? filters.unenrolled
+        ? sql`${enrollments.id} is null`
+        : sql`${enrollments.id} is not null`
+      : undefined,
+  );
 
   const [rows, totals] = await Promise.all([
     db.select({

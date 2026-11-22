@@ -1,6 +1,7 @@
 import { AppPage } from "@/components/layout/app-shell";
 import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
+import { listAcademicYearsForContext } from "@/features/academics/queries";
 import { listStudentsForContext } from "@/features/students/queries";
 import { studentListFilterSchema } from "@/features/students/schema";
 import { StudentTable } from "@/features/students/components/student-table";
@@ -9,12 +10,15 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   const access = await requirePageAccess(["SCHOOL_ADMIN"]);
   if (access.blocked) return access.blocked;
   const params = await searchParams;
+  const years = await listAcademicYearsForContext(access.context);
+  const activeYear = years.find((year) => year.status === "ACTIVE") ?? null;
   const filters = studentListFilterSchema.parse({
     search: typeof params.search === "string" ? params.search : undefined,
     status: typeof params.status === "string" && params.status.length > 0 ? params.status : undefined,
     page: typeof params.page === "string" ? params.page : undefined,
     classroomId: typeof params.classroomId === "string" ? params.classroomId : undefined,
-    academicYearId: typeof params.academicYearId === "string" ? params.academicYearId : undefined,
+    academicYearId: typeof params.academicYearId === "string" ? params.academicYearId : params.unenrolled === "true" ? activeYear?.id : undefined,
+    unenrolled: params.unenrolled === "true",
   });
   const data = await listStudentsForContext(access.context, filters);
 
@@ -24,15 +28,10 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
         breadcrumbs={[{ label: "داشبورد", href: "/dashboard" }, { label: "دانش‌آموزان" }]}
         title="دانش‌آموزان"
         description="فهرست دانش‌آموزان مدرسه، کلاس فعلی و وضعیت پرونده."
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-sage px-3 py-1.5 text-xs font-bold text-primary">{data.total} دانش‌آموز</span>
-            <BackLink href="/dashboard">بازگشت به داشبورد</BackLink>
-          </div>
-        }
+        action={<div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-sage px-3 py-1.5 text-xs font-bold text-primary">{data.total} دانش‌آموز</span><BackLink href="/dashboard">بازگشت به داشبورد</BackLink></div>}
       />
       <div className="mt-6">
-        <StudentTable {...data} search={filters.search} status={filters.status} classroomId={filters.classroomId} academicYearId={filters.academicYearId} />
+        <StudentTable {...data} search={filters.search} status={filters.status} classroomId={filters.classroomId} academicYearId={filters.academicYearId} unenrolled={filters.unenrolled} activeYearId={activeYear?.id} activeYearName={activeYear?.name} />
       </div>
     </AppPage>
   );

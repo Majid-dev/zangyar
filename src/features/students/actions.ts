@@ -9,10 +9,12 @@ import { formDataToObject, nullableString } from "@/features/academics/form-data
 
 import {
   closeEnrollment,
+  createAndLinkGuardian,
   createEnrollment,
   createGuardian,
   createStudent,
   linkGuardian,
+  registerStudent,
   transitionGuardian,
   transitionStudent,
   transferEnrollment,
@@ -23,8 +25,10 @@ import {
 import {
   closeEnrollmentSchema,
   createEnrollmentSchema,
+  createAndLinkGuardianSchema,
   createGuardianSchema,
   createStudentSchema,
+  registerStudentSchema,
   linkGuardianSchema,
   transitionGuardianSchema,
   transitionStudentSchema,
@@ -68,9 +72,19 @@ export async function transitionStudentAction(_previous: unknown, formData: Form
   }, "وضعیت دانش‌آموز تغییر کرد.");
 }
 
+/** One-shot registration used by the guided wizard; all steps land in one transaction. */
+export async function registerStudentAction(input: unknown): Promise<ActionResult<{ studentId: string }>> {
+  return executeAction(async () => {
+    const parsed = registerStudentSchema.parse(input);
+    const result = await registerStudent({ headers: await headers(), input: parsed });
+    revalidateStudents(result.student.id);
+    return { studentId: result.student.id };
+  }, "دانش‌آموز با موفقیت ثبت شد.");
+}
+
 export async function createGuardianAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
   return executeAction(async () => {
-    const result = await createGuardian({ headers: await headers(), input: createGuardianSchema.parse({ ...formDataToObject(formData), normalizedMobile: nullableString(formData.get("normalizedMobile")) }) });
+    const result = await createGuardian({ headers: await headers(), input: createGuardianSchema.parse({ ...formDataToObject(formData), normalizedMobile: nullableString(formData.get("normalizedMobile")), email: nullableString(formData.get("email")) }) });
     revalidateStudents(String(formData.get("studentId") || ""));
     return result;
   }, "ولی با موفقیت ثبت شد.");
@@ -94,7 +108,26 @@ export async function transitionGuardianAction(_previous: unknown, formData: For
 
 export async function linkGuardianAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
   return executeAction(async () => {
-    const input = linkGuardianSchema.parse({ ...formDataToObject(formData), isPrimary: formData.get("isPrimary") === "on", receivesSms: formData.get("receivesSms") === "on", isEmergency: formData.get("isEmergency") === "on" });
+    const flags = { isPrimary: formData.get("isPrimary") === "on", receivesSms: formData.get("receivesSms") === "on", isEmergency: formData.get("isEmergency") === "on" };
+    const guardianId = nullableString(formData.get("guardianId"));
+
+    // An empty guardian id means "create then link": the wizard and the profile
+    // panel use one action, and matching on normalized mobile avoids duplicating
+    // a contact that already exists for a sibling.
+    if (!guardianId) {
+      const input = createAndLinkGuardianSchema.parse({
+        ...formDataToObject(formData),
+        guardianId: undefined,
+        normalizedMobile: nullableString(formData.get("normalizedMobile")),
+        email: nullableString(formData.get("email")),
+        ...flags,
+      });
+      const result = await createAndLinkGuardian({ headers: await headers(), input });
+      revalidateStudents(input.studentId);
+      return result;
+    }
+
+    const input = linkGuardianSchema.parse({ ...formDataToObject(formData), ...flags });
     const result = await linkGuardian({ headers: await headers(), input });
     revalidateStudents(input.studentId);
     return result;

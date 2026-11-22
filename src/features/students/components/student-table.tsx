@@ -13,21 +13,22 @@ const statusLabels = {
   ARCHIVED: "بایگانی‌شده",
 } as const;
 
-export function StudentTable({ rows, total, page, pageSize, search, status, classroomId, academicYearId }: { rows: StudentListRow[]; total: number; page: number; pageSize: number; search?: string; status?: StudentListFilter["status"]; classroomId?: string; academicYearId?: string }) {
+export function StudentTable({ rows, total, page, pageSize, search, status, classroomId, academicYearId, unenrolled, activeYearId, activeYearName }: { rows: StudentListRow[]; total: number; page: number; pageSize: number; search?: string; status?: StudentListFilter["status"]; classroomId?: string; academicYearId?: string; unenrolled?: boolean; activeYearId?: string | null; activeYearName?: string | null }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const filterParams = { ...(search ? { search } : {}), ...(status ? { status } : {}), ...(classroomId ? { classroomId } : {}), ...(academicYearId ? { academicYearId } : {}) };
+  const filterParams = { ...(search ? { search } : {}), ...(status ? { status } : {}), ...(classroomId ? { classroomId } : {}), ...(academicYearId ? { academicYearId } : {}), ...(unenrolled ? { unenrolled: "true" } : {}) };
   const previous = new URLSearchParams({ ...filterParams, page: String(Math.max(1, page - 1)) });
   const next = new URLSearchParams({ ...filterParams, page: String(Math.min(pageCount, page + 1)) });
 
   return (
     <Panel className="overflow-hidden p-0">
       <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <StudentFilters search={search} status={status} />
+        <StudentFilters search={search} status={status} unenrolled={unenrolled} academicYearId={activeYearId ?? ""} />
         <Link href="/students/new" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-primary px-3 text-xs font-bold text-white transition hover:bg-primary/90">افزودن دانش‌آموز</Link>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[700px] text-start text-sm">
           <thead className="bg-sage/50 text-xs text-muted"><tr><th className="px-5 py-3 font-bold">دانش‌آموز</th><th className="px-4 py-3 font-bold">کلاس</th><th className="px-4 py-3 font-bold">ولی اصلی</th><th className="px-4 py-3 font-bold">وضعیت</th><th className="px-5 py-3 text-end font-bold">عملیات</th></tr></thead>
+          <caption className="sr-only">{unenrolled && activeYearName ? `دانش‌آموزان بدون ثبت‌نام در سال تحصیلی ${activeYearName}` : "فهرست دانش‌آموزان مدرسه"}</caption>
           <tbody className="divide-y divide-border">
             {rows.map((student) => <tr key={student.id} className="hover:bg-sage/25"><td className="px-5 py-4"><p className="font-bold text-primary">{student.firstName} {student.lastName}</p><p className="mt-0.5 text-xs text-muted">کد {student.admissionNumber}</p></td><td className="px-4 py-4 text-muted">{student.classroomName ?? "بدون کلاس"}</td><td className="px-4 py-4 text-xs text-muted">{student.guardianName ? `${student.guardianName}${student.guardianMobile ? ` · ${student.guardianMobile}` : ""}` : "ثبت نشده"}</td><td className="px-4 py-4"><Badge tone={student.status === "ACTIVE" ? "success" : "warning"}>{statusLabels[student.status]}</Badge></td><td className="px-5 py-4 text-end"><Link href={`/students/${student.id}`} className="text-xs font-bold text-secondary hover:text-primary">نمایش پرونده</Link></td></tr>)}
             {rows.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-sm text-muted">دانش‌آموزی با این فیلتر پیدا نشد.</td></tr> : null}
