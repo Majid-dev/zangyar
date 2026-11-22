@@ -69,7 +69,7 @@ export async function transitionStudentAction(_previous: unknown, formData: Form
     const result = await transitionStudent({ headers: await headers(), input });
     revalidateStudents(input.studentId);
     return result;
-  }, "وضعیت دانش‌آموز تغییر کرد.");
+  }, formData.get("status") === "ACTIVE" ? "پرونده دانش‌آموز دوباره فعال شد." : "وضعیت دانش‌آموز تغییر کرد.");
 }
 
 /** One-shot registration used by the guided wizard; all steps land in one transaction. */

@@ -42,14 +42,14 @@ export default async function ClassroomsPage() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <Panel className="self-start">
           <SectionHeading title="کلاس جدید" />
-          {years.length === 0 || grades.length === 0 ? (
+          {years.filter((year) => year.status !== "CLOSED" && year.status !== "ARCHIVED").length === 0 || grades.length === 0 ? (
             <p className="mt-5 text-sm leading-7 text-muted">برای ساخت کلاس، ابتدا یک سال تحصیلی و حداقل یک پایه ثبت کنید.</p>
           ) : (
             <ActionForm action={createClassroomAction} className="mt-5 grid gap-4">
               <Field label="سال تحصیلی" name="academicYearId">
                 <Select name="academicYearId" required defaultValue="">
                   <option value="" disabled>انتخاب سال تحصیلی</option>
-                  {years.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}
+                  {years.filter((year) => year.status !== "CLOSED" && year.status !== "ARCHIVED").map((year) => <option key={year.id} value={year.id}>{year.name} [{year.code}]</option>)}
                 </Select>
               </Field>
               <Field label="پایه" name="gradeId">

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
@@ -19,13 +19,24 @@ export function ActionFieldErrorsProvider({ fieldErrors, children }: { fieldErro
   return <FieldErrorsContext.Provider value={fieldErrors}>{children}</FieldErrorsContext.Provider>;
 }
 
-export function ActionForm({ action, children, className }: { action: FormAction; children: React.ReactNode; className?: string }) {
+export function ActionForm({ action, children, className, onChange, onSuccess }: { action: FormAction; children: React.ReactNode; className?: string; onChange?: React.FormEventHandler<HTMLFormElement>; onSuccess?: () => void }) {
   const [state, formAction] = useActionState(action, null);
   const fieldErrors = state && !state.ok ? state.fieldErrors : undefined;
+  const onSuccessRef = useRef(onSuccess);
+
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
+
+  // Notify once per successful result object, so a caller can clear a "dirty"
+  // flag after the server confirms the change.
+  useEffect(() => {
+    if (state?.ok) onSuccessRef.current?.();
+  }, [state]);
 
   return (
     <FieldErrorsContext.Provider value={fieldErrors}>
-      <form action={formAction} className={className} noValidate>
+      <form action={formAction} className={className} onChange={onChange} noValidate>
         {children}
         <ActionFeedback state={state} />
       </form>

@@ -185,7 +185,7 @@ export async function transitionStudent(options: { headers: Headers; input: Tran
       // Use the school's business date, not the server's UTC date, so a withdrawal
       // near midnight in Tehran cannot close enrollments a day early or late.
       const today = getSchoolBusinessDate(context.school.timezone);
-      const closedEnrollments = await tx.update(enrollments).set({ status: "ARCHIVED", endDate: sql`GREATEST(${enrollments.startDate}, ${today}::date)`, updatedAt: new Date() }).where(and(
+      const closedEnrollments = await tx.update(enrollments).set({ status: "ARCHIVED", endDate: sql`GREATEST(${enrollments.startDate} + 1, ${today}::date)`, updatedAt: new Date() }).where(and(
         eq(enrollments.schoolId, context.schoolId),
         eq(enrollments.studentId, student.id),
         eq(enrollments.status, "ACTIVE"),

@@ -47,12 +47,12 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
             <div className="mt-5">
               <EnrollmentPanel
                 studentId={student.id}
-                years={activeYears.map((year) => ({ id: year.id, name: year.name }))}
+                years={activeYears.filter((year) => year.status !== "CLOSED" && year.status !== "ARCHIVED").map((year) => ({ id: year.id, name: year.name, code: year.code }))}
                 classrooms={classrooms.map((classroom) => ({ id: classroom.id, name: classroom.name, academicYearId: classroom.academicYearId }))}
                 enrollments={enrollmentRows.map(({ enrollment, classroom, academicYear }) => ({
                   id: enrollment.id,
                   classroomName: classroom.name,
-                  academicYearName: academicYear.name,
+                  academicYearName: `${academicYear.name} [${academicYear.code}]`,
                   startDate: enrollment.startDate,
                   endDate: enrollment.endDate,
                   status: enrollment.status,

@@ -22,7 +22,7 @@ export default async function NewStudentPage() {
       />
       <div className="mt-6">
         <StudentRegistrationWizard
-          years={years.map((year) => ({ id: year.id, name: year.name, code: year.code, status: year.status }))}
+          years={years.filter((year) => year.status !== "CLOSED" && year.status !== "ARCHIVED").map((year) => ({ id: year.id, name: year.name, code: year.code, status: year.status }))}
           classrooms={classrooms.map((classroom) => ({ id: classroom.id, name: classroom.name, code: classroom.code, academicYearId: classroom.academicYearId }))}
         />
       </div>

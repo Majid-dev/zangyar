@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}));
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { academicYears, auditLogs, classrooms, enrollments, grades, schoolMemberships, schools, students, studentGuardians } from "@/lib/db/schema";
-import { createEnrollment, createGuardian, createStudent, linkGuardian, transferEnrollment } from "./services";
+import { createEnrollment, createGuardian, createStudent, linkGuardian, transitionStudent, transferEnrollment } from "./services";
 
 config({ path: ".env.local" });
 const canRun = Boolean(process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL && process.env.RUN_DB_INTEGRATION_TESTS === "1");
@@ -67,6 +67,19 @@ describe.skipIf(!canRun)("persisted Phase 5 student management", () => {
     const history = await getDb().select().from(enrollments).where(and(eq(enrollments.schoolId, schoolA), eq(enrollments.studentId, studentA)));
     expect(history).toHaveLength(2);
     expect(history.some((enrollment) => enrollment.endDate === "2027-01-01")).toBe(true);
+  });
+
+  it("reactivates a non-active profile without reopening enrollment history", async () => {
+    const db = getDb();
+    await transitionStudent({ headers: admin.headers, input: { studentId: studentA, status: "WITHDRAWN" } });
+    const before = await db.select().from(enrollments).where(and(eq(enrollments.schoolId, schoolA), eq(enrollments.studentId, studentA)));
+    expect(before.every((enrollment) => enrollment.status === "ARCHIVED")).toBe(true);
+
+    const reactivated = await transitionStudent({ headers: admin.headers, input: { studentId: studentA, status: "ACTIVE" } });
+    expect(reactivated.status).toBe("ACTIVE");
+    const after = await db.select().from(enrollments).where(and(eq(enrollments.schoolId, schoolA), eq(enrollments.studentId, studentA)));
+    expect(after.map((enrollment) => enrollment.status)).toEqual(before.map((enrollment) => enrollment.status));
+    expect(after.map((enrollment) => enrollment.endDate)).toEqual(before.map((enrollment) => enrollment.endDate));
   });
 
   it("rejects a cross-tenant guardian link", async () => {
