@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { requireSchoolAccess, requireSchoolRole, type ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getDb } from "@/lib/db";
@@ -44,12 +44,38 @@ export async function listClassrooms(options: { headers: Headers; schoolId?: str
   return listClassroomsForContext(context, options.academicYearId);
 }
 
+/**
+ * Operational classroom list.
+ *
+ * Rooms belonging to a closed or archived academic year are excluded: that year
+ * is history, and its rooms must not be offered for new enrollments, attendance,
+ * or teacher assignment. A draft year stays visible because a school builds next
+ * year's structure before activating it. The rows remain in the database, and the
+ * student pages still resolve historical classrooms by id, so nothing is lost.
+ */
 export async function listClassroomsForContext(context: ActiveSchoolMembership, academicYearId?: string) {
-  return getDb().select().from(classrooms).where(and(
-    eq(classrooms.schoolId, context.schoolId),
-    eq(classrooms.status, "ACTIVE"),
-    academicYearId ? eq(classrooms.academicYearId, academicYearId) : undefined,
-  )).orderBy(asc(classrooms.name));
+  return getDb().select({
+    id: classrooms.id,
+    schoolId: classrooms.schoolId,
+    academicYearId: classrooms.academicYearId,
+    gradeId: classrooms.gradeId,
+    code: classrooms.code,
+    name: classrooms.name,
+    capacity: classrooms.capacity,
+    status: classrooms.status,
+    createdAt: classrooms.createdAt,
+    updatedAt: classrooms.updatedAt,
+  }).from(classrooms)
+    .innerJoin(academicYears, and(
+      eq(academicYears.id, classrooms.academicYearId),
+      eq(academicYears.schoolId, context.schoolId),
+    ))
+    .where(and(
+      eq(classrooms.schoolId, context.schoolId),
+      eq(classrooms.status, "ACTIVE"),
+      inArray(academicYears.status, ["DRAFT", "ACTIVE"]),
+      academicYearId ? eq(classrooms.academicYearId, academicYearId) : undefined,
+    )).orderBy(asc(classrooms.name));
 }
 
 export async function listClassroomTeachers(options: { headers: Headers; schoolId?: string; classroomId?: string }) {

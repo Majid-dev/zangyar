@@ -2,6 +2,7 @@ import { AppPage } from "@/components/layout/app-shell";
 import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
 import { createAcademicYearAction, transitionAcademicYearAction } from "@/features/academics/actions";
+import { AcademicYearCloseAction } from "@/features/academics/components/academic-year-close-action";
 import { listAcademicYearsForContext } from "@/features/academics/queries";
 import { ActionForm, SubmitButton } from "@/components/ui/action-form";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +28,11 @@ export default async function AcademicYearsPage() {
         action={<BackLink href="/academics">بازگشت به ساختار آموزشی</BackLink>}
       />
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <Panel className="order-2 lg:order-1">
+      {/* RTL grid: the first track is the right-hand column, so the creation form
+          owns the right side and the register sits on the left. On narrow screens
+          both stack in source order, form first. */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+        <Panel className="order-2">
           <SectionHeading title="سال‌های ثبت‌شده" description={`${years.length} سال تحصیلی`} />
           <div className="mt-5 divide-y divide-border">
             {years.length === 0 ? (
@@ -50,20 +54,14 @@ export default async function AcademicYearsPage() {
                       <SubmitButton size="sm" variant="secondary" pendingLabel="در حال فعال‌سازی…">فعال‌سازی</SubmitButton>
                     </ActionForm>
                   ) : null}
-                  {year.status === "ACTIVE" ? (
-                    <ActionForm action={transitionAcademicYearAction}>
-                      <input type="hidden" name="academicYearId" value={year.id} />
-                      <input type="hidden" name="status" value="CLOSED" />
-                      <SubmitButton size="sm" variant="ghost" pendingLabel="در حال بستن…">بستن سال</SubmitButton>
-                    </ActionForm>
-                  ) : null}
+                  {year.status === "ACTIVE" ? <AcademicYearCloseAction academicYearId={year.id} academicYearName={year.name} /> : null}
                 </div>
               </article>
             ))}
           </div>
         </Panel>
 
-        <Panel className="order-1 self-start lg:order-2">
+        <Panel className="order-1 self-start">
           <SectionHeading title="سال تحصیلی جدید" description="تاریخ‌ها با تقویم شمسی انتخاب می‌شوند." />
           <ActionForm action={createAcademicYearAction} className="mt-5 grid gap-4">
             <Field label="کد" name="code"><Input name="code" placeholder="1405" required dir="ltr" className="text-start" /></Field>
