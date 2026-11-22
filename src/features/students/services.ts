@@ -254,7 +254,13 @@ export async function createAndLinkGuardian(options: { headers: Headers; input: 
     }
     if (input.receivesSms && !guardian.normalizedMobile) throw new Error("SMS recipients require a guardian mobile.");
     if (input.isPrimary) await tx.update(studentGuardians).set({ isPrimary: false, updatedAt: new Date() }).where(and(eq(studentGuardians.schoolId, context.schoolId), eq(studentGuardians.studentId, student.id)));
-    const [relationship] = await tx.insert(studentGuardians).values({ schoolId: context.schoolId, studentId: student.id, guardianId: guardian.id, relationshipType: input.relationshipType, isPrimary: input.isPrimary, receivesSms: input.receivesSms, isEmergency: input.isEmergency }).returning();
+    // A guardian already linked to this student is updated rather than inserted:
+    // the relationship is unique per (school, student, guardian), so a repeat
+    // submission means "change the flags", not "create a second link".
+    const [relationship] = await tx.insert(studentGuardians).values({ schoolId: context.schoolId, studentId: student.id, guardianId: guardian.id, relationshipType: input.relationshipType, isPrimary: input.isPrimary, receivesSms: input.receivesSms, isEmergency: input.isEmergency }).onConflictDoUpdate({
+      target: [studentGuardians.schoolId, studentGuardians.studentId, studentGuardians.guardianId],
+      set: { relationshipType: input.relationshipType, isPrimary: input.isPrimary, receivesSms: input.receivesSms, isEmergency: input.isEmergency, updatedAt: new Date() },
+    }).returning();
     await writeAuditEvent(tx, { schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId, action: "STUDENT_GUARDIAN_LINKED", entityType: "STUDENT_GUARDIAN", entityId: `${student.id}:${guardian.id}` });
     return { guardian, relationship };
   });
