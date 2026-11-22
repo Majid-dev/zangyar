@@ -212,14 +212,14 @@ export function JalaliDatePicker({
           id={listboxId}
           role="dialog"
           aria-label="انتخاب تاریخ شمسی"
-          className="absolute z-40 mt-2 w-[19rem] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-border bg-surface p-3 shadow-[0_18px_44px_rgba(23,59,87,0.16)]"
+          className="absolute z-40 mt-2 w-[19rem] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-border bg-surface p-4 shadow-[0_18px_44px_rgba(23,59,87,0.16)] ring-1 ring-primary/5"
         >
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               aria-label="ماه بعد"
               onClick={() => setView((current) => addJalaliMonths(current, 1))}
-              className="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-sage hover:text-primary"
+              className="flex size-9 items-center justify-center rounded-xl border border-transparent text-lg text-muted hover:border-border hover:bg-sage hover:text-primary"
             >
               <span aria-hidden="true">›</span>
             </button>
@@ -228,7 +228,7 @@ export function JalaliDatePicker({
                 aria-label="انتخاب سال"
                 value={view.jy}
                 onChange={(event) => setView((current) => ({ ...current, jy: Number(event.target.value), jd: 1 }))}
-                className="min-h-9 rounded-lg border border-border bg-surface px-2 text-xs font-bold tabular-nums text-primary"
+                className="min-h-9 cursor-pointer rounded-xl border border-border bg-surface px-2 text-xs font-bold tabular-nums text-primary outline-none transition-colors hover:border-secondary focus:border-secondary focus:ring-4 focus:ring-secondary/10"
               >
                 {Array.from({ length: 21 }, (_, index) => (todayJalali?.jy ?? view.jy) - 10 + index).map((year) => (
                   <option key={year} value={year}>{toPersianDigits(year)}</option>
@@ -240,7 +240,7 @@ export function JalaliDatePicker({
               type="button"
               aria-label="ماه قبل"
               onClick={() => setView((current) => addJalaliMonths(current, -1))}
-              className="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-sage hover:text-primary"
+              className="flex size-9 items-center justify-center rounded-xl border border-transparent text-lg text-muted hover:border-border hover:bg-sage hover:text-primary"
             >
               <span aria-hidden="true">‹</span>
             </button>
@@ -266,12 +266,12 @@ export function JalaliDatePicker({
                   aria-selected={isSelected}
                   aria-label={formatJalaliDate({ ...view, jd: cell.day })}
                   onClick={() => selectDay(cell.day, cell.iso)}
-                  className={`flex size-9 items-center justify-center rounded-lg text-xs font-bold tabular-nums transition-colors ${
+                  className={`flex size-9 items-center justify-center rounded-xl text-xs font-bold tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-secondary ${
                     isSelected
                       ? "bg-primary text-white"
                       : isToday
-                        ? "bg-accent/20 text-[#8b5a08] hover:bg-accent/30"
-                        : "text-primary hover:bg-sage"
+                        ? "bg-accent/20 text-[#8b5a08] ring-1 ring-accent/50 hover:bg-accent/30"
+                        : "text-primary hover:bg-sage hover:text-primary"
                   }`}
                 >
                   {toPersianDigits(cell.day)}
@@ -291,11 +291,11 @@ export function JalaliDatePicker({
                 }
                 setOpen(false);
               }}
-              className="text-xs font-bold text-secondary hover:text-primary"
+              className="rounded-lg px-2 py-1 text-xs font-bold text-secondary hover:bg-secondary/10 hover:text-primary"
             >
               امروز
             </button>
-            <button type="button" onClick={clear} className="text-xs font-bold text-muted hover:text-danger">پاک کردن</button>
+            <button type="button" onClick={clear} className="rounded-lg px-2 py-1 text-xs font-bold text-muted hover:bg-danger/8 hover:text-danger">پاک کردن</button>
           </div>
         </div>
       ) : null}

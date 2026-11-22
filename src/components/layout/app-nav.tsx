@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import type { NavSection } from "./nav-items";
+import { NavIcon } from "./nav-icon";
 
 /**
  * The active item is the longest href that is the current path or one of its
@@ -45,7 +46,7 @@ export function AppNav({ sections, onNavigate, active }: { sections: readonly Na
                     aria-disabled="true"
                     className="flex min-h-10 cursor-not-allowed items-center gap-3 rounded-xl px-3 text-sm font-bold text-muted/60"
                   >
-                    <span className="flex size-6 items-center justify-center text-base" aria-hidden="true">{item.icon}</span>
+                    <span className="flex size-7 shrink-0 items-center justify-center text-primary/70" aria-hidden="true"><NavIcon name={item.icon} /></span>
                     {item.label}
                   </span>
                 );
@@ -56,9 +57,9 @@ export function AppNav({ sections, onNavigate, active }: { sections: readonly Na
                   href={item.href}
                   onClick={onNavigate}
                   aria-current={isActive ? "page" : undefined}
-                  className={`flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-bold transition-colors ${isActive ? "bg-primary text-white" : "text-muted hover:bg-sage/60 hover:text-primary"}`}
+                  className={`flex min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-bold transition-colors ${isActive ? "bg-primary text-white [&_svg]:text-white" : "text-muted hover:bg-sage/60 hover:text-primary"}`}
                 >
-                  <span className="flex size-6 items-center justify-center text-base" aria-hidden="true">{item.icon}</span>
+                  <span className="flex size-7 shrink-0 items-center justify-center text-primary/70" aria-hidden="true"><NavIcon name={item.icon} /></span>
                   {item.label}
                   {item.attention ? <span className="ms-auto size-2 rounded-full bg-accent" aria-label="نیازمند توجه" /> : null}
                 </Link>
