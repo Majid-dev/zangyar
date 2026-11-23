@@ -51,7 +51,7 @@ A school-owned contact record associated with one or more students. A guardian m
 - Assign teachers to multiple classrooms.
 - Support multiple teachers per classroom.
 - Keep subjects optional for classroom-teacher assignments; subject-specific attendance may require them later.
-- Preserve historical records after an academic year closes.
+- Close an academic year as one coordinated operation that archives active enrollments in that year, leaves student global status unchanged, rejects new operations for the closed year, and preserves all historical records.
 
 ### Student and guardian management
 
@@ -63,6 +63,8 @@ A school-owned contact record associated with one or more students. A guardian m
 - Identify primary, emergency, and SMS-recipient relationships.
 - Enroll students into classrooms for an academic year.
 - Support classroom transfers during an academic year while preserving the student's enrollment history and attendance context.
+- Allow explicit reactivation of withdrawn, graduated, or archived profiles without reopening prior enrollments or assigning a class.
+- Manage guardian contact details, relationship type, primary flag, SMS flag, and emergency flag through one profile edit submission.
 
 ### Attendance
 
@@ -129,7 +131,7 @@ A school-owned contact record associated with one or more students. A guardian m
 4. Assign teachers.
 5. Enroll students.
 6. Process classroom transfers by closing the prior enrollment and creating a new effective-dated enrollment.
-7. Close the year without deleting historical records.
+7. Close the year in one transaction: archive active enrollments at year end, hide closed-year classes from operational views, and preserve historical records without changing student global status.
 
 ### Daily attendance
 
@@ -146,7 +148,8 @@ A school-owned contact record associated with one or more students. A guardian m
 2. Create or reuse a guardian contact within the school.
 3. Link one or more guardians to the student.
 4. Mark SMS eligibility and primary contact relationships.
-5. Create or update the academic-year enrollment.
+5. Create or update the academic-year enrollment. Closed or archived academic years are never offered in new enrollment choices.
+6. Display Persian/Jalali dates at the UI boundary while retaining Gregorian ISO dates in storage and form submission.
 
 ## Business rules
 
@@ -168,6 +171,8 @@ A school-owned contact record associated with one or more students. A guardian m
 16. User-facing Persian-calendar dates are converted to Gregorian dates before storage.
 17. Operational records are archived rather than destructively deleted in the MVP.
 18. Formal guardian-consent workflows are deferred; SMS eligibility is controlled through the student-guardian relationship.
+19. Closed-year classes and new enrollment/class operations are excluded from operational workflows, but historical records remain available.
+20. Student profile reactivation does not reopen historical enrollments or assign a class.
 
 ## MVP exclusions
 

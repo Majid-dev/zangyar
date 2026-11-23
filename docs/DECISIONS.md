@@ -126,6 +126,40 @@ This file records product and architecture decisions for the initial MVP. Decisi
 
 **Rationale:** Application checks provide useful domain errors, while the database constraint prevents concurrent classroom transfers from creating overlapping history.
 
+## ADR-015: Coordinate academic-year closure with enrollment closure
+
+**Status:** Accepted
+
+**Decision:** Closing an academic year is one server-owned transaction. It changes the year to `CLOSED`, archives only active enrollments in that year at the year end, writes audit events, and leaves student global status, terminal enrollments, classes, and historical records unchanged. Closed/archived-year classrooms are hidden from operational lists and cannot be used for new class creation, teacher assignment, attendance, or enrollment.
+
+**Concurrency and retries:** The status transition uses a compare-and-set guard. `CLOSED → CLOSED` remains a legal idempotent retry, but the enrollment sweep and its audit event run only on the real transition into `CLOSED`.
+
+**Rationale:** Academic-year lifecycle and enrollment lifecycle stay separate data concepts while avoiding partial closure states and preserving historical reporting context.
+
+## ADR-016: Reactivate profiles without reopening history
+
+**Status:** Accepted
+
+**Decision:** School Admins can explicitly reactivate `WITHDRAWN`, `GRADUATED`, or `ARCHIVED` student profiles after confirmation. Reactivation changes only `students.status`; it never reopens an enrollment, assigns a class, or changes historical records. The action remains tenant-scoped and uses the existing student transition service.
+
+**Rationale:** A student's global profile lifecycle is distinct from academic-year enrollment history. Requiring explicit confirmation prevents accidental reactivation while keeping prior records immutable.
+
+## ADR-017: Use a shared typed action/form boundary
+
+**Status:** Accepted
+
+**Decision:** Shared forms use `ActionResult`/`ActionState` for validation, safe server errors, field-level errors, pending state, duplicate-submit prevention, and success feedback. `ActionForm` supports caller callbacks for dirty-state and post-success UI updates. Relationship/contact edits that belong to one guardian profile submit through one existing edit action rather than separate relationship and contact saves.
+
+**Rationale:** One submission boundary prevents partial UI saves, keeps server error details private, and makes form behavior consistent across the application.
+
+## ADR-018: Keep visual controls reusable and dependency-free
+
+**Status:** Accepted
+
+**Decision:** Shared `Select` renders a branded accessible listbox while retaining a hidden native select for form submission. It uses rounded menus, Persian RTL alignment, primary selected state, and muted gray hover state. The Jalali picker and sidebar use dependency-free shared SVG/icon primitives rather than adding an icon package.
+
+**Rationale:** Native option popup styling is OS/browser-controlled and inconsistent. A shared control gives ZangYar consistent radius, spacing, focus, hover, and selection treatment without introducing unnecessary dependencies.
+
 ## ADR-012: Preserve historical records through status and archive transitions
 
 **Status:** Accepted

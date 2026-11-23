@@ -144,7 +144,7 @@ export function StudentRegistrationWizard({ years, classrooms }: WizardProps) {
 
         {step === 2 ? (
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="سال تحصیلی"><Select value={academicYearId} onChange={(event) => { setAcademicYearId(event.target.value); setClassroomId(""); }}><option value="">انتخاب سال تحصیلی فعال</option>{activeYears.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</Select></Field>
+            <Field label="سال تحصیلی"><Select value={academicYearId} onChange={(event) => { setAcademicYearId(event.target.value); setClassroomId(""); }}><option value="">انتخاب سال تحصیلی فعال</option>{activeYears.map((year) => <option key={year.id} value={year.id}>{year.name} [{year.code}]</option>)}</Select></Field>
             <Field label="کلاس"><Select value={classroomId} onChange={(event) => setClassroomId(event.target.value)} disabled={!academicYearId}><option value="">{academicYearId ? "انتخاب کلاس" : "ابتدا سال را انتخاب کنید"}</option>{availableClassrooms.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.name}</option>)}</Select></Field>
             <Field label="تاریخ شروع ثبت‌نام"><JalaliDatePicker name="wizard-enrollment-date" required defaultValue={startDate} onValueChange={setStartDate} /></Field>
             {!activeYears.length ? <p className="text-sm text-danger sm:col-span-2">سال تحصیلی فعالی برای ثبت‌نام وجود ندارد.</p> : null}

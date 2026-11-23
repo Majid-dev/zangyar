@@ -6,8 +6,10 @@ vi.mock("server-only", () => ({}));
 import { and, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { auditLogs, academicYears, classrooms, grades, schoolMemberships, schools } from "@/lib/db/schema";
+import { academicYears, auditLogs, classrooms, enrollments, grades, schoolMemberships, schools, students } from "@/lib/db/schema";
 import { createAcademicYear, createClassroom, createGrade, createSubject, assignTeacher, transitionAcademicYear, updateSchoolConfiguration } from "./services";
+import { listClassroomsForContext } from "./queries";
+import { createEnrollment } from "@/features/students/services";
 
 config({ path: ".env.local" });
 
@@ -102,9 +104,123 @@ describe.skipIf(!canRun)("persisted Phase 4 school and academic management", () 
 
   it("enforces academic-year transitions and audit events", async () => {
     await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearA, status: "ACTIVE" } });
-    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearA, status: "CLOSED" } });
     const auditEvents = await getDb().select({ action: auditLogs.action }).from(auditLogs).where(and(eq(auditLogs.schoolId, schoolA), eq(auditLogs.entityId, yearA)));
     expect(auditEvents.map((event) => event.action)).toContain("ACADEMIC_YEAR_STATUS_CHANGED");
+  });
+
+  /**
+   * A school holds at most one ACTIVE year (partial unique index), so a test that
+   * needs a different active year first closes whichever one is active — the same
+   * sequence an operator performs when rolling over to a new academic year.
+   */
+  async function activateYear(academicYearId: string) {
+    const db = getDb();
+    const active = await db.select({ id: academicYears.id }).from(academicYears).where(and(eq(academicYears.schoolId, schoolA), eq(academicYears.status, "ACTIVE")));
+    for (const year of active) {
+      if (year.id === academicYearId) continue;
+      await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: year.id, status: "CLOSED" } });
+    }
+    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId, status: "ACTIVE" } });
+  }
+
+  it("closing a year closes its active enrollments without touching other years or student status", async () => {
+    const db = getDb();
+    const yearC = await createAcademicYear({ headers: admin.headers, input: { code: "1406", name: "سال تحصیلی ۱۴۰۶", startDate: "2027-09-23", endDate: "2028-06-20" } });
+    await activateYear(yearC.id);
+    const gradeC = (await createGrade({ headers: admin.headers, input: { code: "G2", name: "Grade 2", sortOrder: 2 } })).id;
+    const classroomC = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearC.id, gradeId: gradeC, code: "C", name: "Class C" } })).id;
+
+    // Enrollments are per student per year, so each assertion uses its own student.
+    const activeStudent = (await db.insert(students).values({ schoolId: schoolA, admissionNumber: "7001", firstName: "فعال", lastName: "بسته‌شده" }).returning())[0];
+    const archivedStudent = (await db.insert(students).values({ schoolId: schoolA, admissionNumber: "7002", firstName: "بایگانی", lastName: "مانده" }).returning())[0];
+    const otherYearStudent = (await db.insert(students).values({ schoolId: schoolA, admissionNumber: "7003", firstName: "سال", lastName: "دیگر" }).returning())[0];
+
+    const activeInClosed = (await db.insert(enrollments).values({ schoolId: schoolA, studentId: activeStudent.id, academicYearId: yearC.id, classroomId: classroomC, startDate: "2027-09-23", endDate: null }).returning())[0];
+    const alreadyClosed = (await db.insert(enrollments).values({ schoolId: schoolA, studentId: archivedStudent.id, academicYearId: yearC.id, classroomId: classroomC, startDate: "2027-10-01", endDate: "2027-11-01", status: "ARCHIVED" }).returning())[0];
+    // An active enrollment belonging to a different year must not be touched.
+    const otherYear = (await db.insert(enrollments).values({ schoolId: schoolA, studentId: otherYearStudent.id, academicYearId: yearA, classroomId: classroomA, startDate: "2026-09-23", endDate: null }).returning())[0];
+
+    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearC.id, status: "CLOSED" } });
+
+    const [closedRow] = await db.select().from(enrollments).where(eq(enrollments.id, activeInClosed.id));
+    expect(closedRow.status).toBe("ARCHIVED");
+    expect(closedRow.endDate).toBe("2028-06-20");
+
+    // A terminal enrollment keeps its own end date rather than being rewritten.
+    const [untouched] = await db.select().from(enrollments).where(eq(enrollments.id, alreadyClosed.id));
+    expect(untouched.status).toBe("ARCHIVED");
+    expect(untouched.endDate).toBe("2027-11-01");
+
+    const [otherYearRow] = await db.select().from(enrollments).where(eq(enrollments.id, otherYear.id));
+    expect(otherYearRow.status).toBe("ACTIVE");
+    expect(otherYearRow.endDate).toBeNull();
+
+    // The profile is untouched by an academic-year closure.
+    for (const student of [activeStudent, archivedStudent, otherYearStudent]) {
+      const [profile] = await db.select().from(students).where(eq(students.id, student.id));
+      expect(profile.status).toBe("ACTIVE");
+    }
+  });
+
+  it("rejects new classrooms and enrollments in a closed year", async () => {
+    const db = getDb();
+    const yearClosed = await createAcademicYear({ headers: admin.headers, input: { code: "1407", name: "سال بسته", startDate: "2028-09-23", endDate: "2029-06-20" } });
+    await activateYear(yearClosed.id);
+    const gradeD = (await createGrade({ headers: admin.headers, input: { code: "G3", name: "Grade 3", sortOrder: 3 } })).id;
+    const classroomD = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearClosed.id, gradeId: gradeD, code: "D", name: "Class D" } })).id;
+    const student = (await db.insert(students).values({ schoolId: schoolA, admissionNumber: "7004", firstName: "بسته", lastName: "سال" }).returning())[0];
+
+    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearClosed.id, status: "CLOSED" } });
+
+    await expect(createClassroom({ headers: admin.headers, input: { academicYearId: yearClosed.id, gradeId: gradeD, code: "E", name: "Closed year class" } })).rejects.toThrow("not available");
+    await expect(createEnrollment({ headers: admin.headers, input: { studentId: student.id, academicYearId: yearClosed.id, classroomId: classroomD, startDate: "2028-09-23", endDate: null } })).rejects.toThrow("Only an active academic year");
+  });
+
+  it("closing a year twice has the effect of closing it once", async () => {
+    const db = getDb();
+    const yearRepeat = await createAcademicYear({ headers: admin.headers, input: { code: "1409", name: "سال تکراری", startDate: "2030-09-23", endDate: "2031-06-20" } });
+    await activateYear(yearRepeat.id);
+    const grade = (await createGrade({ headers: admin.headers, input: { code: "G5", name: "Grade 5", sortOrder: 5 } })).id;
+    const room = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearRepeat.id, gradeId: grade, code: "G", name: "Repeat room" } })).id;
+    const student = (await db.insert(students).values({ schoolId: schoolA, admissionNumber: "7005", firstName: "تکراری", lastName: "بستن" }).returning())[0];
+    const enrollment = (await db.insert(enrollments).values({ schoolId: schoolA, studentId: student.id, academicYearId: yearRepeat.id, classroomId: room, startDate: "2030-09-23", endDate: null }).returning())[0];
+
+    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearRepeat.id, status: "CLOSED" } });
+    const [afterFirst] = await db.select().from(enrollments).where(eq(enrollments.id, enrollment.id));
+
+    // A repeat closure is a legal no-op: the enrollment must not be rewritten and
+    // the operation must not be audited a second time.
+    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearRepeat.id, status: "CLOSED" } });
+    const [afterSecond] = await db.select().from(enrollments).where(eq(enrollments.id, enrollment.id));
+
+    expect(afterSecond.status).toBe("ARCHIVED");
+    expect(afterSecond.endDate).toBe(afterFirst.endDate);
+    expect(afterSecond.updatedAt.getTime()).toBe(afterFirst.updatedAt.getTime());
+
+    const sweeps = await db.select({ action: auditLogs.action }).from(auditLogs).where(and(
+      eq(auditLogs.schoolId, schoolA),
+      eq(auditLogs.entityId, yearRepeat.id),
+      eq(auditLogs.action, "ACADEMIC_YEAR_ENROLLMENTS_CLOSED"),
+    ));
+    expect(sweeps).toHaveLength(1);
+  });
+
+  it("hides classrooms of a closed year from the operational list", async () => {
+    const db = getDb();
+    const yearOpen = await createAcademicYear({ headers: admin.headers, input: { code: "1408", name: "سال باز", startDate: "2029-09-23", endDate: "2030-06-20" } });
+    await activateYear(yearOpen.id);
+    const grade = (await createGrade({ headers: admin.headers, input: { code: "G4", name: "Grade 4", sortOrder: 4 } })).id;
+    const room = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearOpen.id, gradeId: grade, code: "F", name: "Open room" } })).id;
+
+    const [school] = await db.select().from(schools).where(eq(schools.id, schoolA));
+    const membership = (await db.select().from(schoolMemberships).where(and(eq(schoolMemberships.schoolId, schoolA), eq(schoolMemberships.userId, admin.id))))[0];
+    const context = { membershipId: membership.id, schoolId: schoolA, userId: admin.id, role: "SCHOOL_ADMIN" as const, school };
+
+    expect((await listClassroomsForContext(context)).some((row) => row.id === room)).toBe(true);
+    await transitionAcademicYear({ headers: admin.headers, input: { academicYearId: yearOpen.id, status: "CLOSED" } });
+    expect((await listClassroomsForContext(context)).some((row) => row.id === room)).toBe(false);
+    // Historical rows survive: only the operational listing hides them.
+    expect((await db.select().from(classrooms).where(eq(classrooms.id, room))).length).toBe(1);
   });
 
   it("rejects teacher access to admin-only academic operations", async () => {

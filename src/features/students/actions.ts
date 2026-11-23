@@ -69,7 +69,7 @@ export async function transitionStudentAction(_previous: unknown, formData: Form
     const result = await transitionStudent({ headers: await headers(), input });
     revalidateStudents(input.studentId);
     return result;
-  }, "وضعیت دانش‌آموز تغییر کرد.");
+  }, formData.get("status") === "ACTIVE" ? "پرونده دانش‌آموز دوباره فعال شد." : "وضعیت دانش‌آموز تغییر کرد.");
 }
 
 /** One-shot registration used by the guided wizard; all steps land in one transaction. */
@@ -92,8 +92,31 @@ export async function createGuardianAction(_previous: unknown, formData: FormDat
 
 export async function updateGuardianAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
   return executeAction(async () => {
-    const result = await updateGuardian({ headers: await headers(), input: updateGuardianSchema.parse({ ...formDataToObject(formData), normalizedMobile: nullableString(formData.get("normalizedMobile")) }) });
-    revalidateStudents(String(formData.get("studentId") || ""));
+    const studentId = nullableString(formData.get("studentId"));
+    const guardianInput = updateGuardianSchema.parse({
+      ...formDataToObject(formData),
+      normalizedMobile: nullableString(formData.get("normalizedMobile")),
+    });
+    const result = await updateGuardian({ headers: await headers(), input: guardianInput });
+
+    // The profile editor owns both contact details and this student's relationship
+    // flags. Keep one submit action so operators cannot save one half and forget
+    // the other; absent relationship fields preserve existing non-profile callers.
+    if (studentId && formData.has("relationshipType")) {
+      await updateStudentGuardian({
+        headers: await headers(),
+        input: updateStudentGuardianSchema.parse({
+          studentId,
+          guardianId: guardianInput.guardianId,
+          relationshipType: formData.get("relationshipType"),
+          isPrimary: formData.get("isPrimary") === "on",
+          receivesSms: formData.get("receivesSms") === "on",
+          isEmergency: formData.get("isEmergency") === "on",
+        }),
+      });
+    }
+
+    revalidateStudents(studentId ?? "");
     return result;
   }, "اطلاعات ولی به‌روزرسانی شد.");
 }

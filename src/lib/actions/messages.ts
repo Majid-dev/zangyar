@@ -14,6 +14,7 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "Academic year end date must be after its start date.": "تاریخ پایان سال تحصیلی باید بعد از تاریخ شروع باشد.",
   "Academic year is not available for classrooms.": "سال تحصیلی انتخاب‌شده برای ساخت کلاس در دسترس نیست.",
   "Academic year not found.": "سال تحصیلی پیدا نشد.",
+  "Academic year status changed concurrently.": "وضعیت این سال تحصیلی همزمان تغییر کرده است. صفحه را دوباره بارگذاری کنید.",
   "Active enrollment not found.": "ثبت‌نام فعالی برای این دانش‌آموز پیدا نشد.",
   "Archived guardians cannot be linked.": "ولی بایگانی‌شده را نمی‌توان به دانش‌آموز متصل کرد.",
   "Attendance includes a student outside the effective classroom roster.": "فهرست حضور شامل دانش‌آموزی خارج از ترکیب مؤثر کلاس است.",

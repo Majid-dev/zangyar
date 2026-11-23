@@ -66,7 +66,7 @@ erDiagram
 
 | Entity | Ownership | Cardinality and lifecycle |
 |---|---|---|
-| `academic_years` | School | A school has many over time; normally one active year. Closing does not delete history. |
+| `academic_years` | School | A school has many over time; normally one active year. Closing atomically archives active enrollments in that year, does not alter student global status, and does not delete history. |
 | `grades` | School | A school has many grade definitions; archive rather than delete when referenced. |
 | `classrooms` | School and academic year | A classroom belongs to one academic year and grade; historical classrooms remain available for reporting. |
 | `subjects` | School | School-local catalog; archive when no longer offered. |
@@ -114,7 +114,7 @@ Store the school-level attendance notification policy in the one-to-one school s
 
 ### `academic_years`
 
-`schoolId`, code/name, Gregorian start date, Gregorian end date, status, created/closed timestamps. The application may accept Persian-calendar input and converts it before persistence. Unique `(schoolId, code)`. Validate start date before end date. A partial unique index may enforce one active year per school if that is the accepted policy.
+`schoolId`, code/name, Gregorian start date, Gregorian end date, status, created/closed timestamps. The application may accept Persian-calendar input and converts it before persistence. Unique `(schoolId, code)`. Validate start date before end date. A partial unique index enforces one active year per school. Closing is a coordinated transaction: the year becomes `CLOSED` and only its `ACTIVE` enrollments become archived with an end date at the year end; already terminal enrollments, students, classrooms, and other academic years remain unchanged. Repeating closure is an idempotent no-op.
 
 ### `grades`, `subjects`, and `classrooms`
 
@@ -140,7 +140,7 @@ Store a normalized mobile number for matching and delivery, plus an optional ema
 
 ### `enrollments`
 
-References school, student, academic year, and classroom and includes `startDate` (inclusive), `endDate` (exclusive, nullable for an open current enrollment), and status. Enrollment is separate from the student profile: a student keeps one profile row across academic years and gains one enrollment row per year, so re-enrollment never duplicates identity. Composite foreign keys ensure all references are same-school and classroom/year-compatible. Multiple sequential enrollments are allowed for classroom transfers, but date ranges for the same student and academic year must not overlap. PostgreSQL should enforce this with a range exclusion constraint where practical, for example a school/student/year equality plus `daterange(startDate, endDate, '[)')` overlap exclusion. A transfer closes the prior enrollment and creates a new enrollment; attendance remains linked to the enrollment that was effective on the attendance business date.
+References school, student, academic year, and classroom and includes `startDate` (inclusive), `endDate` (exclusive, nullable for an open current enrollment), and status. Enrollment is separate from the student profile: a student keeps one profile row across academic years and gains one enrollment row per year, so re-enrollment never duplicates identity. Composite foreign keys ensure all references are same-school and classroom/year-compatible. Multiple sequential enrollments are allowed for classroom transfers, but date ranges for the same student and academic year must not overlap. PostgreSQL enforces this with a range exclusion constraint. A transfer closes the prior enrollment and creates a new enrollment; attendance remains linked to the enrollment that was effective on the attendance business date. Closing an academic year archives only active enrollments in that year; reactivating a student profile never reopens historical enrollments.
 
 ### `attendance_sessions`
 
@@ -241,7 +241,7 @@ audit_logs(actor_user_id, occurred_at)
 - Subjects are optional for classroom-teacher assignments.
 - Operational records use archive/status transitions instead of destructive deletion in the MVP.
 - Formal guardian-consent workflows are deferred; SMS eligibility remains explicit on the student-guardian relationship.
-- Student lifecycle uses `ACTIVE`, `WITHDRAWN`, `GRADUATED`, and `ARCHIVED`; student status transitions preserve references and close active enrollment when required.
+- Student lifecycle uses `ACTIVE`, `WITHDRAWN`, `GRADUATED`, and `ARCHIVED`; non-active profiles may be explicitly reactivated, which changes only global profile status and never reopens enrollments or assigns a classroom.
 - Guardian mobile and student national ID are normalized at the application boundary before school-scoped uniqueness checks.
 - Student-guardian relationship rows are retained; new links require a relationship type, and SMS eligibility requires a valid normalized mobile.
 - PostgreSQL range exclusion enforces non-overlapping enrollment ranges; adjacent `[startDate, endDate)` transfers remain valid.

@@ -1,9 +1,11 @@
 import type { SchoolRole } from "@/lib/auth/authorization-core";
 
+export type NavIconName = "dashboard" | "students" | "classrooms" | "academics" | "attendance" | "activities" | "notifications";
+
 export type NavItem = {
   href: string;
   label: string;
-  icon: string;
+  icon: NavIconName;
   roles?: readonly SchoolRole[];
   disabled?: boolean;
   attention?: boolean;
@@ -14,22 +16,22 @@ export type NavSection = { label: string; items: readonly NavItem[] };
 const SCHOOL_NAV_SECTIONS: readonly NavSection[] = [
   {
     label: "نمای کلی",
-    items: [{ href: "/dashboard", label: "داشبورد", icon: "⌂" }],
+    items: [{ href: "/dashboard", label: "داشبورد", icon: "dashboard" }],
   },
   {
     label: "مدیریت مدرسه",
     items: [
-      { href: "/students", label: "دانش‌آموزان", icon: "◎", roles: ["SCHOOL_ADMIN"] },
-      { href: "/academics/classrooms", label: "کلاس‌ها", icon: "▦", roles: ["SCHOOL_ADMIN"] },
-      { href: "/academics", label: "ساختار آموزشی", icon: "⌘", roles: ["SCHOOL_ADMIN"] },
+      { href: "/students", label: "دانش‌آموزان", icon: "students", roles: ["SCHOOL_ADMIN"] },
+      { href: "/academics/classrooms", label: "کلاس‌ها", icon: "classrooms", roles: ["SCHOOL_ADMIN"] },
+      { href: "/academics", label: "ساختار آموزشی", icon: "academics", roles: ["SCHOOL_ADMIN"] },
     ],
   },
   {
     label: "عملیات روزانه",
     items: [
-      { href: "/attendance", label: "حضور و غیاب", icon: "✓", roles: ["SCHOOL_ADMIN", "TEACHER"], attention: true },
-      { href: "#activities", label: "فعالیت‌های کلاسی", icon: "✦", disabled: true },
-      { href: "#notifications", label: "اطلاع‌رسانی", icon: "◌", disabled: true },
+      { href: "/attendance", label: "حضور و غیاب", icon: "attendance", roles: ["SCHOOL_ADMIN", "TEACHER"], attention: true },
+      { href: "#activities", label: "فعالیت‌های کلاسی", icon: "activities", disabled: true },
+      { href: "#notifications", label: "اطلاع‌رسانی", icon: "notifications", disabled: true },
     ],
   },
 ];

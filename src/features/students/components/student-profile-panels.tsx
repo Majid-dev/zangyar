@@ -18,13 +18,20 @@ import {
   transitionStudentAction,
   updateGuardianAction,
   updateStudentAction,
-  updateStudentGuardianAction,
 } from "../actions";
 
 const studentStatusLabels = { ACTIVE: "فعال", WITHDRAWN: "ترک‌تحصیل", GRADUATED: "فارغ‌التحصیل", ARCHIVED: "بایگانی‌شده" } as const;
 
 export function StudentProfileCard({ student }: { student: { id: string; admissionNumber: string; firstName: string; lastName: string; nationalId: string | null; birthDate: string | null; status: keyof typeof studentStatusLabels } }) {
   const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
+
+  function closeEditor() {
+    setEditing(false);
+    setDirty(false);
+    setConfirmingClose(false);
+  }
 
   if (!editing) {
     return (
@@ -39,14 +46,33 @@ export function StudentProfileCard({ student }: { student: { id: string; admissi
 
   return (
     <div className="space-y-4">
-      <ActionForm action={updateStudentAction} className="grid gap-4 sm:grid-cols-2">
+      <ActionForm
+        action={updateStudentAction}
+        onChange={() => setDirty(true)}
+        onSuccess={() => { setDirty(false); setEditing(false); }}
+        className="grid gap-4 sm:grid-cols-2"
+      >
         <input type="hidden" name="studentId" value={student.id} />
         <Field label="شماره دانش‌آموزی"><Input name="admissionNumber" defaultValue={student.admissionNumber} required /></Field>
         <Field label="کد ملی" hint="اختیاری"><Input name="nationalId" defaultValue={student.nationalId ?? ""} inputMode="numeric" className="text-start" /></Field>
         <Field label="نام"><Input name="firstName" defaultValue={student.firstName} required /></Field>
         <Field label="نام خانوادگی"><Input name="lastName" defaultValue={student.lastName} required /></Field>
         <Field label="تاریخ تولد" hint="اختیاری"><JalaliDatePicker name="birthDate" defaultValue={student.birthDate} /></Field>
-        <div className="flex items-end gap-2"><SubmitButton size="sm" pendingLabel="در حال ذخیره…">ذخیره تغییرات</SubmitButton></div>
+
+        {/* Sits on the Birth Date row and matches the control height, so the pair
+            lines up with the input instead of floating below it. */}
+        <div className="flex flex-wrap items-center gap-2 self-end">
+          <SubmitButton className="min-h-11" pendingLabel="در حال ذخیره…">ذخیره تغییرات</SubmitButton>
+          {confirmingClose ? (
+            <span className="flex flex-wrap items-center gap-2 rounded-xl border border-warning/35 bg-warning/8 px-3 py-2 text-xs text-muted">
+              تغییرات ذخیره‌نشده از دست می‌رود. بسته شود؟
+              <Button type="button" size="sm" variant="danger" onClick={closeEditor}>بستن بدون ذخیره</Button>
+              <button type="button" onClick={() => setConfirmingClose(false)} className="text-xs font-bold text-muted hover:text-primary">انصراف</button>
+            </span>
+          ) : (
+            <Button type="button" size="md" variant="ghost" className="min-h-11" onClick={() => (dirty ? setConfirmingClose(true) : closeEditor())}>بستن</Button>
+          )}
+        </div>
       </ActionForm>
       <StudentStatusActions studentId={student.id} status={student.status} />
     </div>
@@ -56,6 +82,7 @@ export function StudentProfileCard({ student }: { student: { id: string; admissi
 function StudentStatusActions({ studentId, status }: { studentId: string; status: keyof typeof studentStatusLabels }) {
   const [state, setState] = useState<ActionState<unknown>>(null);
   const [isPending, startTransition] = useTransition();
+  const [confirming, setConfirming] = useState(false);
   const targets: { value: string; label: string; question: string }[] = [
     { value: "WITHDRAWN", label: "ثبت ترک‌تحصیل", question: "دانش‌آموز ترک‌تحصیل شود؟ ثبت‌نام‌های فعال بسته می‌شوند." },
     { value: "GRADUATED", label: "ثبت فارغ‌التحصیلی", question: "دانش‌آموز فارغ‌التحصیل شود؟" },
@@ -66,10 +93,36 @@ function StudentStatusActions({ studentId, status }: { studentId: string; status
     const data = new FormData();
     data.set("studentId", studentId);
     data.set("status", target);
-    startTransition(async () => setState(await transitionStudentAction(null, data)));
+    startTransition(async () => { setState(await transitionStudentAction(null, data)); setConfirming(false); });
   }
 
-  if (status !== "ACTIVE") return null;
+  // A non-active profile can be returned to ACTIVE. The confirmation explains
+  // that this restores the profile only: past enrollments and history stay as
+  // they are, and no class is assigned.
+  if (status !== "ACTIVE") {
+    return (
+      <div className="border-t border-border pt-4">
+        <p className="text-xs font-bold text-muted">فعال‌سازی مجدد پرونده</p>
+        {confirming ? (
+          <div className="mt-2 rounded-xl border border-warning/35 bg-warning/8 p-3" role="alertdialog" aria-modal="true" aria-label="فعال‌سازی مجدد پرونده">
+            <p className="text-sm font-bold leading-6 text-primary">این پرونده دوباره فعال شود؟</p>
+            <ul className="mt-2 list-disc space-y-1 pe-4 text-xs leading-6 text-muted">
+              <li>وضعیت پرونده به «فعال» تغییر می‌کند.</li>
+              <li>سوابق قبلی، ثبت‌نام‌ها و اطلاعات تحصیلی بدون تغییر باقی می‌مانند.</li>
+              <li>هیچ ثبت‌نامی به‌صورت خودکار باز نمی‌شود و کلاسی تخصیص نمی‌یابد.</li>
+            </ul>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" variant="secondary" disabled={isPending} onClick={() => run("ACTIVE")}>{isPending ? "…" : "فعال‌سازی پرونده"}</Button>
+              <button type="button" onClick={() => setConfirming(false)} className="text-xs font-bold text-muted hover:text-primary">انصراف</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2"><Button type="button" size="sm" variant="secondary" onClick={() => setConfirming(true)}>فعال‌سازی مجدد پرونده</Button></div>
+        )}
+        <ActionFeedback state={state} />
+      </div>
+    );
+  }
 
   return (
     <div className="border-t border-border pt-4">
@@ -98,7 +151,15 @@ export function GuardianPanel({ studentId, guardians }: { studentId: string; gua
               <Field label="نام خانوادگی"><Input name="lastName" defaultValue={guardian.lastName} required /></Field>
               <Field label="شماره همراه"><Input name="normalizedMobile" defaultValue={guardian.normalizedMobile ?? ""} inputMode="tel" dir="ltr" className="text-start" /></Field>
               <Field label="ایمیل" hint="اختیاری"><Input name="email" type="email" defaultValue={guardian.email ?? ""} dir="ltr" className="text-start" /></Field>
-              <div className="flex items-end gap-2 sm:col-span-2"><SubmitButton size="sm" pendingLabel="در حال ذخیره…">ذخیره</SubmitButton><Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(null)}>بستن</Button></div>
+              <div className="sm:col-span-2">
+                <GuardianRelationshipField label="رابطه" name="relationshipType" value={guardian.relationshipType} />
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-bold text-primary sm:col-span-2">
+                <label className="flex items-center gap-2"><input type="checkbox" name="isPrimary" defaultChecked={guardian.isPrimary} className="size-4" /> اصلی</label>
+                <label className="flex items-center gap-2"><input type="checkbox" name="receivesSms" defaultChecked={guardian.receivesSms} className="size-4" /> پیامک</label>
+                <label className="flex items-center gap-2"><input type="checkbox" name="isEmergency" defaultChecked={guardian.isEmergency} className="size-4" /> اضطراری</label>
+              </div>
+              <div className="flex items-center gap-2 sm:col-span-2"><SubmitButton size="sm" pendingLabel="در حال ذخیره…">ذخیره</SubmitButton><Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(null)}>بستن</Button></div>
             </ActionForm>
           ) : (
             <>
@@ -115,16 +176,7 @@ export function GuardianPanel({ studentId, guardians }: { studentId: string; gua
                   <Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(guardian.id)}>ویرایش</Button>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-border pt-3">
-                <ActionForm action={updateStudentGuardianAction} className="flex flex-wrap items-end gap-3">
-                  <input type="hidden" name="studentId" value={studentId} />
-                  <input type="hidden" name="guardianId" value={guardian.id} />
-                  <GuardianRelationshipField label="رابطه" name="relationshipType" value={guardian.relationshipType} />
-                  <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="isPrimary" defaultChecked={guardian.isPrimary} className="size-4" /> اصلی</label>
-                  <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="receivesSms" defaultChecked={guardian.receivesSms} className="size-4" /> پیامک</label>
-                  <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="isEmergency" defaultChecked={guardian.isEmergency} className="size-4" /> اضطراری</label>
-                  <div className="pb-1"><SubmitButton size="sm" variant="secondary" pendingLabel="…">ذخیره رابطه</SubmitButton></div>
-                </ActionForm>
+              <div className="mt-3 flex items-center border-t border-border pt-3">
                 <GuardianArchiveAction guardianId={guardian.id} studentId={studentId} status={guardian.status} />
               </div>
             </>
@@ -190,7 +242,7 @@ function LinkGuardianForm({ studentId, existingCount }: { studentId: string; exi
 
 export function EnrollmentPanel({ studentId, years, classrooms, enrollments, activeYearId, unenrolledActiveYear }: {
   studentId: string;
-  years: Array<{ id: string; name: string }>;
+  years: Array<{ id: string; name: string; code: string }>;
   classrooms: Array<{ id: string; name: string; academicYearId: string }>;
   enrollments: Array<{ id: string; classroomName: string; academicYearName: string; startDate: string; endDate: string | null; status: "ACTIVE" | "ARCHIVED" }>;
   activeYearId: string | null;
@@ -229,7 +281,7 @@ export function EnrollmentPanel({ studentId, years, classrooms, enrollments, act
         ) : (
           <ActionForm action={createEnrollmentAction} className="mt-4 grid gap-3 sm:grid-cols-2">
             <input type="hidden" name="studentId" value={studentId} />
-            <Field label="سال تحصیلی"><Select name="academicYearId" value={yearId} onChange={(event) => setYearId(event.target.value)} required><option value="">انتخاب سال</option>{years.map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}</Select></Field>
+            <Field label="سال تحصیلی"><Select name="academicYearId" value={yearId} onChange={(event) => setYearId(event.target.value)} required><option value="">انتخاب سال</option>{years.map((year) => <option key={year.id} value={year.id}>{year.name} [{year.code}]</option>)}</Select></Field>
             <Field label="کلاس"><Select name="classroomId" required disabled={!yearId}><option value="">{yearId ? "انتخاب کلاس" : "ابتدا سال را انتخاب کنید"}</option>{options.map((classroom) => <option key={classroom.id} value={classroom.id}>{classroom.name}</option>)}</Select></Field>
             <Field label="تاریخ شروع"><JalaliDatePicker name="startDate" required /></Field>
             <Field label="تاریخ پایان" hint="اختیاری"><JalaliDatePicker name="endDate" /></Field>

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { requireSchoolRole } from "@/lib/auth/authorization";
@@ -11,6 +11,7 @@ import {
   academicYears,
   classTeachers,
   classrooms,
+  enrollments,
   grades,
   schoolSettings,
   schools,
@@ -152,11 +153,52 @@ export async function transitionAcademicYear(options: { headers: Headers; input:
     if (!currentYear) throw new Error("Academic year not found.");
     assertAcademicYearTransition(currentYear.status, input.status);
 
+    // Compare-and-set on the status we just observed, so a concurrent request can
+    // never overwrite a newer decision with a stale one.
     const [year] = await tx
       .update(academicYears)
       .set({ status: input.status, closedAt: input.status === "CLOSED" ? new Date() : null, updatedAt: new Date() })
-      .where(and(eq(academicYears.id, input.academicYearId), eq(academicYears.schoolId, context.schoolId)))
+      .where(and(
+        eq(academicYears.id, input.academicYearId),
+        eq(academicYears.schoolId, context.schoolId),
+        eq(academicYears.status, currentYear.status),
+      ))
       .returning();
+    if (!year) throw new Error("Academic year status changed concurrently.");
+
+    // The sweep runs only on a real transition into CLOSED. CLOSED -> CLOSED is a
+    // legal no-op the policy allows for retries, so gating on the observed status
+    // keeps a repeat closure from re-auditing an operation that already happened.
+    // The ACTIVE predicate on the enrollments makes the close idempotent anyway:
+    // a second pass simply matches nothing.
+    if (input.status === "CLOSED" && currentYear.status !== "CLOSED") {
+      // Active enrollments end with their academic year. GREATEST guards the
+      // date-order check if legacy data starts after the year end; terminal
+      // enrollments are excluded by the status predicate and keep their history.
+      const closedEnrollments = await tx
+        .update(enrollments)
+        .set({
+          status: "ARCHIVED",
+          endDate: sql`GREATEST(${enrollments.startDate}, ${currentYear.endDate}::date)`,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(enrollments.schoolId, context.schoolId),
+          eq(enrollments.academicYearId, currentYear.id),
+          eq(enrollments.status, "ACTIVE"),
+        ))
+        .returning({ id: enrollments.id, endDate: enrollments.endDate });
+
+      await writeAuditEvent(tx, {
+        schoolId: context.schoolId,
+        actorUserId: context.userId,
+        actorMembershipId: context.membershipId,
+        action: "ACADEMIC_YEAR_ENROLLMENTS_CLOSED",
+        entityType: "ACADEMIC_YEAR",
+        entityId: year.id,
+        metadata: { enrollmentCount: closedEnrollments.length, closedAt: currentYear.endDate },
+      });
+    }
 
     await writeAuditEvent(tx, {
       schoolId: context.schoolId,
@@ -240,7 +282,7 @@ export async function createClassroom(options: { headers: Headers; input: Create
     const [year] = await tx.select().from(academicYears).where(and(
       eq(academicYears.id, input.academicYearId), eq(academicYears.schoolId, context.schoolId),
     )).limit(1);
-    if (!year || year.status === "ARCHIVED") throw new Error("Academic year is not available for classrooms.");
+    if (!year || year.status === "CLOSED" || year.status === "ARCHIVED") throw new Error("Academic year is not available for classrooms.");
 
     const [grade] = await tx.select().from(grades).where(and(
       eq(grades.id, input.gradeId), eq(grades.schoolId, context.schoolId),
@@ -267,7 +309,7 @@ export async function assignTeacher(options: { headers: Headers; input: AssignTe
       .innerJoin(academicYears, and(eq(academicYears.id, classrooms.academicYearId), eq(academicYears.schoolId, context.schoolId)))
       .where(and(eq(classrooms.id, input.classroomId), eq(classrooms.schoolId, context.schoolId)))
       .limit(1);
-    if (!classroom || classroom.classroom.status === "ARCHIVED" || classroom.year.status === "ARCHIVED") {
+    if (!classroom || classroom.classroom.status === "ARCHIVED" || classroom.year.status === "CLOSED" || classroom.year.status === "ARCHIVED") {
       throw new Error("Classroom is not available for teacher assignment.");
     }
     if (input.startDate < classroom.year.startDate || input.startDate >= classroom.year.endDate ||

@@ -72,6 +72,19 @@ input, select, textarea {
 
 textarea { min-height: 7rem; resize: vertical; }
 
+/* Keep native option menus aligned with ZangYar controls where the browser
+   exposes these colors. Popup chrome itself remains OS-controlled. */
+select option {
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-vazirmatn), Tahoma, sans-serif;
+}
+
+select option:checked {
+  background: var(--primary);
+  color: white;
+}
+
 .field { display: grid; gap: 0.5rem; color: var(--primary); font-size: 0.875rem; font-weight: 700; }
 
 .button-primary, .button-secondary {
