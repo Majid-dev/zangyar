@@ -13,6 +13,7 @@ export default async function TeachersPage({ searchParams }: { searchParams: Pro
   const filters = teacherListFilterSchema.parse({
     name: typeof params.name === "string" ? params.name : undefined,
     mobile: typeof params.mobile === "string" ? params.mobile : undefined,
+    personnelCode: typeof params.personnelCode === "string" ? params.personnelCode : undefined,
     membershipStatus: typeof params.membershipStatus === "string" && params.membershipStatus.length > 0 ? params.membershipStatus : undefined,
     invitationStatus: typeof params.invitationStatus === "string" && params.invitationStatus.length > 0 ? params.invitationStatus : undefined,
     sort: typeof params.sort === "string" ? params.sort : undefined,
@@ -41,6 +42,7 @@ export default async function TeachersPage({ searchParams }: { searchParams: Pro
           {...data}
           name={filters.name}
           mobile={filters.mobile}
+          personnelCode={filters.personnelCode}
           membershipStatus={filters.membershipStatus}
           invitationStatus={filters.invitationStatus}
           sort={filters.sort}

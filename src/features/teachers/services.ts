@@ -5,7 +5,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { writeAuditEvent } from "@/lib/audit";
 import { getAuthForTransaction, mobileAccountEmail } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { accounts, schoolMemberships, schools, teacherInvitations, teacherProfiles, users } from "@/lib/db/schema";
+import { accounts, otpChallenges, schoolMemberships, schools, teacherInvitations, teacherProfiles, users } from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
 import { normalizeIranianMobile } from "@/lib/mobile";
 
@@ -18,11 +18,13 @@ import {
   resendTeacherInvitationSchema,
   revokeTeacherInvitationSchema,
   teacherTransitionSchema,
+  updateTeacherMobileSchema,
   updateTeacherSchema,
   type ActivateTeacherInput,
   type CreateTeacherInput,
   type TeacherTransitionInput,
   type UpdateTeacherInput,
+  type UpdateTeacherMobileInput,
 } from "./schema";
 import { generateInvitationToken, hashInvitationToken, invitationExpiry, invitationTtlHours } from "./tokens";
 
@@ -170,6 +172,7 @@ async function findTeacherMembership(tx: Transaction, schoolId: string, userId: 
 async function resolveTeacherMembership(tx: Transaction, schoolId: string, teacherId: string) {
   const [row] = await tx
     .select({
+      teacherId: teacherProfiles.id,
       membershipId: schoolMemberships.id,
       userId: schoolMemberships.userId,
       status: schoolMemberships.status,
@@ -425,6 +428,128 @@ export async function updateTeacher(options: { headers: Headers; input: UpdateTe
 }
 
 /**
+ * Corrects the mobile number of a teacher who has not activated yet.
+ *
+ * The mobile number *is* the login identity, so this is deliberately narrow: it is
+ * allowed only while activation is outstanding (no credential account) and is
+ * refused outright for an activated account, whose owner has since been told that
+ * number and whose reset flow is addressed by it.
+ *
+ * The new number's verification state is derived here, never taken from input. A
+ * number that already belongs to a verified account cannot be claimed — that would
+ * silently hand this school a login to somebody else's identity — so the change is
+ * refused. The replacement identity is created in an unverified state, which keeps
+ * it unsignable until the teacher proves the number through the activation code,
+ * so swapping the number never bypasses mobile verification.
+ */
+export async function updateTeacherMobile(options: { headers: Headers; input: UpdateTeacherMobileInput }) {
+  const context = await requireTeacherManagementAccess(options.headers);
+  const input = updateTeacherMobileSchema.parse(options.input);
+  const mobile = normalizeIranianMobile(input.mobile) ?? input.mobile;
+
+  // No auth context is needed: the change writes only domain columns and never goes
+  // through Better Auth's user-update path, which would clear an unverified phone.
+  return withProvisioningTransaction(async (tx) => {
+    try {
+      const resolved = await resolveTeacherMembership(tx, context.schoolId, input.teacherId);
+      if (!resolved) throw new Error("Teacher not found.");
+
+      // Lock the identity being replaced so a concurrent activation cannot slip in
+      // between the checks below and the swap.
+      const [current] = await tx
+        .select({ id: users.id, phoneNumber: users.phoneNumber })
+        .from(users)
+        .where(eq(users.id, resolved.userId))
+        .limit(1)
+        .for("update");
+
+      if (!current) throw new Error("Teacher not found.");
+
+      if (current.phoneNumber === mobile) {
+        throw new Error("This is already the teacher's mobile number.");
+      }
+
+      // Only an un-activated account may have its number corrected.
+      const [credential] = await tx
+        .select({ id: accounts.id })
+        .from(accounts)
+        .where(and(
+          eq(accounts.userId, resolved.userId),
+          eq(accounts.providerId, "credential"),
+          eq(accounts.accountId, resolved.userId),
+        ))
+        .limit(1);
+
+      if (credential) throw new Error("An activated teacher's mobile number cannot be changed.");
+
+      const [claimed] = await tx
+        .select({ id: users.id, phoneNumberVerified: users.phoneNumberVerified })
+        .from(users)
+        .where(eq(users.phoneNumber, mobile))
+        .limit(1)
+        .for("update");
+
+      if (claimed) {
+        // Reclaiming an existing identity would either duplicate a person or grant
+        // access to another tenant's account, and escalating an unverified one is
+        // not this flow's decision.
+        throw new Error("This mobile number already belongs to another account.");
+      }
+
+      // Better Auth's own update path clears an unverified phone, so the value is
+      // written directly inside this transaction and the verification flag is set
+      // explicitly. The new identity stays unverified until activation proves it.
+      // The placeholder email is derived from the number, so it moves with it; if it
+      // is somehow taken, the unique constraint rejects the change rather than
+      // leaving the row pointing at the old number.
+      await tx
+        .update(users)
+        .set({
+          phoneNumber: mobile,
+          phoneNumberVerified: false,
+          email: mobileAccountEmail(mobile),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, resolved.userId));
+
+      // The outstanding invitation was addressed to the old number's challenge, so
+      // it is withdrawn. Any code already issued for the old number is revoked with
+      // it, which is what stops the previous holder from completing activation.
+      await revokePendingInvitations(tx, context.schoolId, resolved.membershipId, context.userId);
+      await tx
+        .update(otpChallenges)
+        .set({ status: "REVOKED", revokedAt: new Date(), updatedAt: new Date() })
+        .where(and(
+          eq(otpChallenges.phoneNumber, current.phoneNumber ?? ""),
+          eq(otpChallenges.status, "PENDING"),
+        ));
+
+      const invitation = await issueInvitation(tx, {
+        schoolId: context.schoolId,
+        membershipId: resolved.membershipId,
+        actorUserId: context.userId,
+      });
+
+      await writeAuditEvent(tx, {
+        schoolId: context.schoolId,
+        actorUserId: context.userId,
+        actorMembershipId: context.membershipId,
+        action: "TEACHER_MOBILE_UPDATED",
+        entityType: "SCHOOL_MEMBERSHIP",
+        entityId: resolved.membershipId,
+        // The old and new numbers are deliberately absent: an audit trail should not
+        // accumulate contact details, and the change is already attributable.
+        metadata: { targetUserId: resolved.userId, invitationId: invitation.id },
+      });
+
+      return { teacherId: resolved.teacherId, invitation };
+    } catch (error) {
+      databaseConflict(error, "The teacher's mobile number could not be updated.");
+    }
+  });
+}
+
+/**
  * Deactivates or reactivates a teacher by changing membership status.
  *
  * Suspension is the deactivation mechanism because every authorization check
@@ -658,6 +783,17 @@ export async function activateTeacher(options: { input: ActivateTeacherInput }) 
       accountId: membership.userId,
       password: await authContext.password.hash(input.newPassword),
     });
+
+    // Verification is a consequence of a completed activation: the teacher proved
+    // the number by entering the code that was sent to it. This matters for an
+    // account whose mobile was corrected while pending — that number was left
+    // unverified precisely so the swap could not bypass verification, and this is
+    // where it becomes verified. Signing in requires a verified phone, so without
+    // this a renumbered teacher could never sign in even after activating.
+    await tx
+      .update(users)
+      .set({ phoneNumberVerified: true, updatedAt: new Date() })
+      .where(eq(users.id, membership.userId));
 
     await writeAuditEvent(tx, {
       schoolId: invitation.schoolId,

@@ -14,6 +14,7 @@ import {
   revokeTeacherInvitationAction,
   setTeacherMembershipStatusAction,
   updateTeacherAction,
+  updateTeacherMobileAction,
 } from "../actions";
 import type { TeacherInvitationRow } from "../queries";
 import { INVITATION_STATUS_LABELS, TEACHER_ACCOUNT_STATUS_LABELS, type TeacherAccountStatus } from "../status";
@@ -24,6 +25,7 @@ type TeacherPanelData = {
   firstName: string;
   lastName: string;
   personnelCode: string | null;
+  maskedMobile: string | null;
   membershipStatus: "ACTIVE" | "SUSPENDED" | "REVOKED";
   accountStatus: TeacherAccountStatus;
   invitationStatus: string;
@@ -51,7 +53,7 @@ export function TeacherProfileCard({ teacher }: { teacher: TeacherPanelData }) {
           </div>
           <div>
             <p className="text-xs text-muted">کد پرسنلی</p>
-            <p className="mt-1 text-sm font-bold text-primary" dir="ltr">{teacher.personnelCode ?? "ثبت نشده"}</p>
+            <p className="mt-1 text-sm font-bold text-primary">{teacher.personnelCode ?? "ثبت نشده"}</p>
           </div>
           <div>
             <p className="text-xs text-muted">وضعیت حساب</p>
@@ -62,6 +64,11 @@ export function TeacherProfileCard({ teacher }: { teacher: TeacherPanelData }) {
         <div className="flex justify-end">
           <Button type="button" size="sm" variant="secondary" onClick={() => setEditing(true)}>ویرایش اطلاعات دبیر</Button>
         </div>
+
+        {/* The mobile number is the login identity, so it is editable only while
+            activation is outstanding. Once the teacher has set a password, the number
+            is what they were told to sign in with and is no longer the admin's to change. */}
+        {teacher.accountStatus !== "ACTIVE" ? <TeacherMobileEditor teacherId={teacher.teacherId} maskedMobile={teacher.maskedMobile} /> : null}
 
         {/* Access management is a standing control, not a side effect of editing:
             deactivating a teacher must not require entering the edit form first. */}
@@ -84,6 +91,56 @@ export function TeacherProfileCard({ teacher }: { teacher: TeacherPanelData }) {
         <p className="text-xs leading-6 text-muted sm:col-span-2">
           تغییر نام، نام حساب کاربری دبیر را هم به‌روزرسانی می‌کند تا فهرست و ورود او با هم یکسان بمانند.
         </p>
+      </ActionForm>
+    </div>
+  );
+}
+
+/**
+ * Corrects the mobile number of a not-yet-activated teacher.
+ *
+ * Shown only while activation is outstanding, because the number is the login
+ * identity: once the teacher has activated, that number is what they sign in with
+ * and changing it is a different (and more sensitive) operation. The server
+ * enforces the same rule, so hiding the control is a courtesy rather than the
+ * boundary.
+ *
+ * Changing the number withdraws the outstanding invitation and issues a new one,
+ * which the admin must pass along again — the panel says so, because the previous
+ * link stops working.
+ */
+function TeacherMobileEditor({ teacherId, maskedMobile }: { teacherId: string; maskedMobile: string | null }) {
+  // The submission, feedback, and pending state all come from `ActionForm`, so no
+  // local transition state is needed here.
+  const [editing, setEditing] = useState(false);
+
+  if (!editing) {
+    return (
+      <div className="border-t border-border pt-4">
+        <p className="text-xs font-bold text-muted">شماره همراه</p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-bold text-primary" dir="ltr">{maskedMobile ?? "ثبت نشده"}</p>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(true)}>تغییر شماره همراه</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-border pt-4">
+      <p className="text-xs font-bold text-muted">تغییر شماره همراه</p>
+      <ActionForm action={updateTeacherMobileAction} onSuccess={() => setEditing(false)} className="mt-2 grid gap-3">
+        <input type="hidden" name="teacherId" value={teacherId} />
+        <Field label="شماره همراه تازه" name="mobile" hint="نام کاربری دبیر">
+          <Input name="mobile" type="tel" inputMode="tel" dir="ltr" required placeholder="09120000000" className="text-start" />
+        </Field>
+        <p className="text-xs leading-6 text-muted">
+          چون شماره همراه نام کاربری دبیر است، با تغییر آن دعوت قبلی باطل می‌شود و باید پیوند فعال‌سازی تازه را برای دبیر بفرستید. شماره تازه تا زمانی که دبیر فعال‌سازی را کامل نکند تأیید نمی‌شود.
+        </p>
+        <div className="flex items-center gap-2">
+          <SubmitButton size="sm" pendingLabel="در حال تغییر…">ذخیره شماره تازه</SubmitButton>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>بستن</Button>
+        </div>
       </ActionForm>
     </div>
   );

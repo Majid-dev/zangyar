@@ -94,6 +94,9 @@ function orderFor(sort: TeacherListFilter["sort"], dir: TeacherListFilter["dir"]
       return [direction(users.phoneNumber), asc(profile.lastName)];
     case "status":
       return [direction(schoolMemberships.status), asc(profile.lastName)];
+    case "personnel":
+      // Nulls last in both directions, so unset codes do not lead the list.
+      return [direction(profile.personnelCode), asc(profile.lastName)];
     // Both remaining sorts are name-based; the invitation axis is filtered rather
     // than ordered because it is derived from a joined row.
     default:
@@ -119,6 +122,9 @@ export async function listTeachersForContext(
   // A pasted number may carry Persian digits or separators; normalize to the
   // stored canonical spelling before matching.
   const mobilePattern = filters.mobile ? `%${toAsciiDigits(filters.mobile).replace(/[\s\-()]/g, "")}%` : undefined;
+  // Personnel codes are typed in either digit script, so the term is converted the
+  // same way a mobile number is.
+  const personnelPattern = filters.personnelCode ? `%${toAsciiDigits(filters.personnelCode)}%` : undefined;
 
   const invitationStatus = filters.invitationStatus;
   const invitationCondition: SQL | undefined = invitationStatus
@@ -143,6 +149,7 @@ export async function listTeachersForContext(
         )
       : undefined,
     mobilePattern ? ilike(users.phoneNumber, mobilePattern) : undefined,
+    personnelPattern ? ilike(teacherProfiles.personnelCode, personnelPattern) : undefined,
     invitationCondition,
   );
 

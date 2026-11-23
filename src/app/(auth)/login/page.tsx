@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getAuth } from "@/lib/auth";
@@ -77,6 +78,12 @@ export default async function LoginPage() {
             <h2 className="mt-2 text-3xl font-black tracking-tight text-primary">خوش آمدید</h2>
             <p className="mt-3 text-sm leading-7 text-muted">
               با شماره همراه و گذرواژه‌ای که مدیر مدرسه برای شما ثبت کرده وارد شوید.
+            </p>
+            <p className="mt-2 text-xs leading-6 text-muted">
+              گذرواژه‌تان را فراموش کرده‌اید؟{" "}
+              <Link href="/reset-password" className="font-bold text-secondary hover:text-primary">
+                بازیابی گذرواژه
+              </Link>
             </p>
           </div>
 

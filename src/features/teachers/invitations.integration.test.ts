@@ -19,7 +19,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { listTeacherInvitationsForContext, resolveActivationToken } from "./queries";
-import { activateTeacher, createTeacher, resendTeacherInvitation, revokeTeacherInvitation, setTeacherMembershipStatus } from "./services";
+import { activateTeacher, createTeacher, resendTeacherInvitation, revokeTeacherInvitation, setTeacherMembershipStatus, updateTeacherMobile } from "./services";
 import { hashInvitationToken } from "./tokens";
 import { requestOtp } from "@/features/otp/service";
 import { getOtpConfig } from "@/lib/otp/config";
@@ -384,6 +384,34 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
       }),
     );
     expect(response.status).toBe(404);
+  });
+
+  it("lets a teacher whose mobile was corrected activate and then sign in", async () => {
+    const created = await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "هدایت", lastName: "ملکی", mobile: "09122230001" },
+    });
+
+    // The admin corrects the number while activation is outstanding.
+    const moved = await updateTeacherMobile({
+      headers: admin.headers,
+      input: { teacherId: created.teacherId, mobile: "09122230002" },
+    });
+
+    // The replacement number is unverified, so it cannot sign in yet.
+    expect((await signInWithPhone("09122230002", PASSWORD)).status).toBe(401);
+
+    // Activating with the new link proves the new number, which is what makes it
+    // verified and therefore signable. This guards a renumbered teacher being
+    // stranded: unverified at the swap, and never re-verified afterwards.
+    await activateTeacher({ input: await activationInput("09122230002", moved.invitation.token) });
+
+    const [user] = await getDb().select({ verified: users.phoneNumberVerified }).from(users).where(eq(users.phoneNumber, "09122230002"));
+    expect(user.verified).toBe(true);
+
+    const signedIn = await signInWithPhone("09122230002", PASSWORD);
+    expect(signedIn.status).toBe(200);
+    expect(signedIn.headers.get("set-cookie")).toBeTruthy();
   });
 
   it("reports a usable invitation preview without leaking other tenants", async () => {

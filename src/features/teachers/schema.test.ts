@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTeacherSchema, teacherListFilterSchema, updateTeacherSchema } from "./schema";
+import { createTeacherSchema, teacherListFilterSchema, updateTeacherMobileSchema, updateTeacherSchema } from "./schema";
 
 describe("createTeacherSchema", () => {
   it("normalizes every accepted Iranian mobile spelling to one canonical form", () => {
@@ -52,6 +52,37 @@ describe("createTeacherSchema", () => {
   });
 });
 
+describe("updateTeacherMobileSchema", () => {
+  const teacherId = "3f0a1e6c-1a2b-4c3d-8e4f-5a6b7c8d9e0f";
+
+  it("normalizes every accepted spelling to the canonical form", () => {
+    for (const mobile of ["09123456789", "+989123456789", "00989123456789", "9123456789", "۰۹۱۲۳۴۵۶۷۸۹"]) {
+      expect(updateTeacherMobileSchema.parse({ teacherId, mobile }).mobile).toBe("09123456789");
+    }
+  });
+
+  it("rejects a number that is not an Iranian mobile", () => {
+    for (const mobile of ["0812345678", "0912345678", "02123456789", "not-a-number"]) {
+      expect(updateTeacherMobileSchema.safeParse({ teacherId, mobile }).success).toBe(false);
+    }
+  });
+
+  it("strips any attempt to set verification or tenant state directly", () => {
+    // Verification state is derived from how the replacement identity is created, so
+    // no input may assert it.
+    const parsed = updateTeacherMobileSchema.parse({
+      teacherId,
+      mobile: "09123456789",
+      phoneNumberVerified: true,
+      schoolId: "00000000-0000-0000-0000-000000000000",
+      userId: "someone-else",
+    });
+    expect(parsed).not.toHaveProperty("phoneNumberVerified");
+    expect(parsed).not.toHaveProperty("schoolId");
+    expect(parsed).not.toHaveProperty("userId");
+  });
+});
+
 describe("teacherListFilterSchema", () => {
   it("accepts each whitelisted status axis", () => {
     for (const membershipStatus of ["ACTIVE", "SUSPENDED", "REVOKED"]) {
@@ -60,6 +91,11 @@ describe("teacherListFilterSchema", () => {
     for (const invitationStatus of ["PENDING", "EXPIRED", "REVOKED", "CONSUMED", "NONE"]) {
       expect(teacherListFilterSchema.parse({ invitationStatus }).invitationStatus).toBe(invitationStatus);
     }
+  });
+
+  it("accepts the personnel code and the personnel sort field", () => {
+    expect(teacherListFilterSchema.parse({ personnelCode: "T-12" }).personnelCode).toBe("T-12");
+    expect(teacherListFilterSchema.parse({ sort: "personnel" }).sort).toBe("personnel");
   });
 
   it("rejects an unknown status and an unknown sort field", () => {

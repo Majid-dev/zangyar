@@ -40,6 +40,7 @@ export default async function TeacherDetailPage({ params }: { params: Promise<{ 
                 firstName: teacher.firstName,
                 lastName: teacher.lastName,
                 personnelCode: teacher.personnelCode,
+                maskedMobile: teacher.maskedMobile,
                 membershipStatus: teacher.membershipStatus,
                 accountStatus: teacher.accountStatus,
                 invitationStatus: teacher.invitationStatus,

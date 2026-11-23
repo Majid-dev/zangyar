@@ -46,6 +46,18 @@ export const updateTeacherSchema = z.object({
   personnelCode: personnelCode.optional().default(null),
 });
 
+/**
+ * Editing the mobile number of a teacher whose account is not yet activated.
+ *
+ * Only usable while activation is outstanding. The number is normalized and
+ * validated exactly as at provisioning, and the verification state is re-asserted
+ * by the service rather than accepted from this input.
+ */
+export const updateTeacherMobileSchema = z.object({
+  teacherId: uuid,
+  mobile: normalizedMobile,
+});
+
 export const teacherTransitionSchema = z.object({
   teacherId: uuid,
   status: z.enum(["ACTIVE", "SUSPENDED", "REVOKED"]),
@@ -77,7 +89,7 @@ export const activateTeacherSchema = z
     message: "تکرار گذرواژه با گذرواژه یکسان نیست.",
   });
 
-export const teacherSortFieldSchema = z.enum(["name", "mobile", "status", "invitation"]);
+export const teacherSortFieldSchema = z.enum(["name", "mobile", "status", "invitation", "personnel"]);
 export const sortDirectionSchema = z.enum(["asc", "desc"]);
 export const membershipStatusSchema = z.enum(["ACTIVE", "SUSPENDED", "REVOKED"]);
 export const invitationStatusFilterSchema = z.enum(["PENDING", "EXPIRED", "REVOKED", "CONSUMED", "NONE"]);
@@ -90,6 +102,7 @@ export const invitationStatusFilterSchema = z.enum(["PENDING", "EXPIRED", "REVOK
 export const teacherListFilterSchema = z.object({
   name: z.string().trim().max(100).optional(),
   mobile: z.string().trim().max(20).optional(),
+  personnelCode: z.string().trim().max(50).optional(),
   membershipStatus: membershipStatusSchema.optional(),
   invitationStatus: invitationStatusFilterSchema.optional(),
   sort: teacherSortFieldSchema.default("name"),
@@ -100,6 +113,7 @@ export const teacherListFilterSchema = z.object({
 
 export type CreateTeacherInput = z.input<typeof createTeacherSchema>;
 export type UpdateTeacherInput = z.input<typeof updateTeacherSchema>;
+export type UpdateTeacherMobileInput = z.input<typeof updateTeacherMobileSchema>;
 export type TeacherTransitionInput = z.infer<typeof teacherTransitionSchema>;
 export type ActivateTeacherInput = z.input<typeof activateTeacherSchema>;
 export type TeacherListFilter = z.infer<typeof teacherListFilterSchema>;

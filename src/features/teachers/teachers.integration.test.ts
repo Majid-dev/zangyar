@@ -22,7 +22,7 @@ import {
 } from "@/lib/db/schema";
 import { getTeacherForContext, listTeachersForContext } from "./queries";
 import { teacherListFilterSchema } from "./schema";
-import { createTeacher, setTeacherMembershipStatus, updateTeacher } from "./services";
+import { createTeacher, setTeacherMembershipStatus, updateTeacher, updateTeacherMobile } from "./services";
 
 config({ path: ".env.local" });
 
@@ -448,5 +448,128 @@ describe.skipIf(!canRun)("teacher provisioning", () => {
     // The query is anchored on the verified school, so the other school's admin
     // gets nothing even with a valid profile id.
     expect(await getTeacherForContext(asContext(otherAdmin), ownProfile.id)).toBeNull();
+  });
+
+  it("lets a School Admin correct the mobile of a not-yet-activated teacher", async () => {
+    const created = await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "بهنام", lastName: "صابری", mobile: "09121112001" },
+    });
+
+    const result = await updateTeacherMobile({
+      headers: admin.headers,
+      input: { teacherId: created.teacherId, mobile: "09121112999" },
+    });
+
+    const db = getDb();
+    const [user] = await db.select().from(users).where(eq(users.phoneNumber, "09121112999"));
+    expect(user).toBeTruthy();
+    // The replacement identity is unverified, so it cannot sign in until the teacher
+    // proves the number through the activation code.
+    expect(user.phoneNumberVerified).toBe(false);
+    // The placeholder email follows the number.
+    expect(user.email).toBe("09121112999@mobile.zangyar.local");
+
+    // The old number is released.
+    const stale = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, "09121112001"));
+    expect(stale).toHaveLength(0);
+
+    // The previous invitation is withdrawn and a fresh one issued.
+    const pending = await db
+      .select({ id: teacherInvitations.id })
+      .from(teacherInvitations)
+      .where(and(eq(teacherInvitations.membershipId, created.membershipId), eq(teacherInvitations.status, "PENDING")));
+    expect(pending).toHaveLength(1);
+    expect(pending[0].id).toBe(result.invitation.id);
+    expect(result.invitation.token).toBeTruthy();
+  });
+
+  it("refuses to change the mobile of an activated teacher", async () => {
+    const created = await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "نیلوفر", lastName: "رحیمی", mobile: "09121112002" },
+    });
+
+    // Simulate a completed activation by linking a credential account.
+    const db = getDb();
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, "09121112002"));
+    await db.insert(accounts).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      providerId: "credential",
+      accountId: user.id,
+      password: "hashed-placeholder-not-a-real-hash",
+    });
+
+    await expect(
+      updateTeacherMobile({ headers: admin.headers, input: { teacherId: created.teacherId, mobile: "09121112998" } }),
+    ).rejects.toThrow("An activated teacher's mobile number cannot be changed.");
+
+    // The original number still belongs to the teacher.
+    const unchanged = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, "09121112002"));
+    expect(unchanged).toHaveLength(1);
+  });
+
+  it("refuses to claim a mobile number that another account already uses", async () => {
+    const created = await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "اردوان", lastName: "مقدم", mobile: "09121112003" },
+    });
+
+    // A second teacher holds the number we will try to take.
+    await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "شبنم", lastName: "مقدم", mobile: "09121112004" },
+    });
+
+    await expect(
+      updateTeacherMobile({ headers: admin.headers, input: { teacherId: created.teacherId, mobile: "09121112004" } }),
+    ).rejects.toThrow("This mobile number already belongs to another account.");
+
+    // The original identity is untouched.
+    const db = getDb();
+    const stillThere = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, "09121112003"));
+    expect(stillThere).toHaveLength(1);
+  });
+
+  it("refuses a mobile change for a teacher of another school", async () => {
+    const foreign = await createTeacher({
+      headers: otherAdmin.headers,
+      input: { firstName: "کامران", lastName: "بابایی", mobile: "09121112005" },
+    });
+
+    await expect(
+      updateTeacherMobile({ headers: admin.headers, input: { teacherId: foreign.teacherId, mobile: "09121112006" } }),
+    ).rejects.toThrow("Teacher not found.");
+
+    const db = getDb();
+    const untouched = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, "09121112005"));
+    expect(untouched).toHaveLength(1);
+  });
+
+  it("refuses the teacher's own current number as a change", async () => {
+    const created = await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "پروین", lastName: "اکبری", mobile: "09121112007" },
+    });
+
+    await expect(
+      updateTeacherMobile({ headers: admin.headers, input: { teacherId: created.teacherId, mobile: "09121112007" } }),
+    ).rejects.toThrow("This is already the teacher's mobile number.");
+  });
+
+  it("filters teachers by personnel code", async () => {
+    const context = asContext(admin);
+    await createTeacher({
+      headers: admin.headers,
+      input: { firstName: "فرزانه", lastName: "کیانی", mobile: "09121112008", personnelCode: "P-7788" },
+    });
+
+    const found = await listTeachersForContext(context, teacherListFilterSchema.parse({ personnelCode: "P-7788", pageSize: 100 }));
+    expect(found.rows).toHaveLength(1);
+    expect(found.rows[0].lastName).toBe("کیانی");
+
+    const missing = await listTeachersForContext(context, teacherListFilterSchema.parse({ personnelCode: "ZZZ-000", pageSize: 100 }));
+    expect(missing.rows).toHaveLength(0);
   });
 });

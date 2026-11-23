@@ -8,12 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input, Select } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
 import { formatPersianDateShort } from "@/lib/date";
-import { maskIranianMobile } from "@/lib/mobile";
 
 import type { TeacherListRow } from "../queries";
 import { INVITATION_STATUS_LABELS } from "../status";
 
-type SortField = "name" | "mobile" | "status" | "invitation";
+type SortField = "name" | "mobile" | "status" | "invitation" | "personnel";
 type Direction = "asc" | "desc";
 
 const MEMBERSHIP_STATUS_LABELS: Record<"ACTIVE" | "SUSPENDED" | "REVOKED", string> = {
@@ -28,6 +27,21 @@ const MEMBERSHIP_STATUS_TONES: Record<"ACTIVE" | "SUSPENDED" | "REVOKED", "succe
   REVOKED: "danger",
 };
 
+/**
+ * Digits are rendered in Persian and grouped as `0912 345 6789`, but the value is
+ * kept `dir="ltr"` and only the runs are Persian, so the number reads left-to-right
+ * the way a phone number does while still matching the surrounding script.
+ */
+function formatMobileForDisplay(mobile: string | null) {
+  if (!mobile) return null;
+  const groups = [mobile.slice(0, 4), mobile.slice(4, 7), mobile.slice(7)].filter((part) => part.length > 0);
+  return groups.map((part) => toPersianDigits(part)).join(" ");
+}
+
+function toPersianDigits(value: string) {
+  return value.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+}
+
 type TeacherTableProps = {
   rows: TeacherListRow[];
   total: number;
@@ -35,6 +49,7 @@ type TeacherTableProps = {
   pageSize: number;
   name?: string;
   mobile?: string;
+  personnelCode?: string;
   membershipStatus?: string;
   invitationStatus?: string;
   sort?: SortField;
@@ -57,6 +72,7 @@ export function TeacherTable({
   pageSize,
   name = "",
   mobile = "",
+  personnelCode = "",
   membershipStatus,
   invitationStatus,
   sort = "name",
@@ -108,10 +124,12 @@ export function TeacherTable({
               <HeaderCell label="دبیر" sortField="name" sort={sort} dir={dir} onSort={sortBy}>
                 <TextFilter label="نام دبیر" placeholder="نام یا نام خانوادگی" value={name} onSubmit={(value) => updateParams({ name: value || null })} />
               </HeaderCell>
-              <HeaderCell label="شماره همراه" sortField="mobile" sort={sort} dir={dir} onSort={sortBy}>
-                <TextFilter label="شماره همراه" placeholder="۰۹…" value={mobile} onSubmit={(value) => updateParams({ mobile: value || null })} />
+              <HeaderCell label="شماره همراه" sortField="mobile" sort={sort} dir={dir} onSort={sortBy} align="end">
+                <TextFilter label="شماره همراه" placeholder="۰۹…" value={mobile} onSubmit={(value) => updateParams({ mobile: value || null })} dir="ltr" />
               </HeaderCell>
-              <HeaderCell label="کد پرسنلی" sortField="name" sort={sort} dir={dir} onSort={sortBy} hideSort />
+              <HeaderCell label="کد پرسنلی" sortField="personnel" sort={sort} dir={dir} onSort={sortBy} align="end">
+                <TextFilter label="کد پرسنلی" placeholder="کد" value={personnelCode} onSubmit={(value) => updateParams({ personnelCode: value || null })} dir="ltr" />
+              </HeaderCell>
               <HeaderCell label="دسترسی به مدرسه" sortField="status" sort={sort} dir={dir} onSort={sortBy}>
                 <Select aria-label="فیلتر وضعیت دسترسی" value={membershipStatus ?? ""} onChange={(event) => updateParams({ membershipStatus: event.target.value || null })} className="min-h-8 px-2 text-xs">
                   <option value="">همه وضعیت‌ها</option>
@@ -141,8 +159,15 @@ export function TeacherTable({
                     {teacher.firstName} {teacher.lastName}
                   </Link>
                 </td>
-                <td className="px-4 py-4 text-start text-xs text-muted" dir="ltr">{maskIranianMobile(teacher.mobile) ?? "ثبت نشده"}</td>
-                <td className="px-4 py-4 text-start text-xs text-muted">{teacher.personnelCode ?? "—"}</td>
+                <td className="px-4 py-4 text-end text-xs text-muted">
+                  {formatMobileForDisplay(teacher.mobile) ? (
+                    // Full number, grouped and in Persian digits, rendered LTR so the
+                    // digit order reads the way a phone number should. Kept as text
+                    // with tabular figures so the column stays vertically aligned.
+                    <span dir="ltr" className="inline-block font-bold tabular-nums text-primary">{formatMobileForDisplay(teacher.mobile)}</span>
+                  ) : "ثبت نشده"}
+                </td>
+                <td className="px-4 py-4 text-end text-xs text-muted">{teacher.personnelCode ?? "—"}</td>
                 <td className="px-4 py-4 text-start">
                   <Badge tone={MEMBERSHIP_STATUS_TONES[teacher.membershipStatus]}>{MEMBERSHIP_STATUS_LABELS[teacher.membershipStatus]}</Badge>
                 </td>
@@ -179,10 +204,10 @@ function toIsoDate(value: Date | string) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
-function HeaderCell({ label, sortField, sort, dir, onSort, children, hideSort = false }: { label: string; sortField: SortField; sort: SortField; dir: Direction; onSort: (field: SortField) => void; children?: React.ReactNode; hideSort?: boolean }) {
+function HeaderCell({ label, sortField, sort, dir, onSort, children, hideSort = false, align = "start" }: { label: string; sortField: SortField; sort: SortField; dir: Direction; onSort: (field: SortField) => void; children?: React.ReactNode; hideSort?: boolean; align?: "start" | "end" }) {
   const active = sort === sortField;
   return (
-    <th scope="col" className="px-4 py-3 text-start align-top font-bold first:ps-5">
+    <th scope="col" className={`px-4 py-3 align-top font-bold first:ps-5 ${align === "end" ? "text-end" : "text-start"}`}>
       {hideSort ? (
         <span>{label}</span>
       ) : (
@@ -203,7 +228,7 @@ function HeaderCell({ label, sortField, sort, dir, onSort, children, hideSort = 
  * external changes from back/forward navigation, and a remount would drop focus
  * mid-typing. The DOM node stays the source of truth.
  */
-function TextFilter({ label, placeholder, value, onSubmit }: { label: string; placeholder: string; value: string; onSubmit: (value: string) => void }) {
+function TextFilter({ label, placeholder, value, onSubmit, dir }: { label: string; placeholder: string; value: string; onSubmit: (value: string) => void; dir?: "ltr" | "rtl" }) {
   const formRef = useRef<HTMLFormElement>(null);
   const submitRef = useRef(onSubmit);
   const inputId = `teacher-filter-${label}`;
@@ -246,7 +271,14 @@ function TextFilter({ label, placeholder, value, onSubmit }: { label: string; pl
   return (
     <form ref={formRef} onSubmit={(event) => event.preventDefault()}>
       <label className="sr-only" htmlFor={inputId}>{`فیلتر ${label}`}</label>
-      <Input id={inputId} name={inputId} defaultValue={value} placeholder={placeholder} className="min-h-8 px-2 text-xs" />
+      <Input
+        id={inputId}
+        name={inputId}
+        defaultValue={value}
+        placeholder={placeholder}
+        dir={dir}
+        className={`min-h-8 px-2 text-xs ${dir === "ltr" ? "text-start" : ""}`}
+      />
     </form>
   );
 }

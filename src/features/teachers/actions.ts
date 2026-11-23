@@ -15,6 +15,7 @@ import {
   revokeTeacherInvitation,
   setTeacherMembershipStatus,
   updateTeacher,
+  updateTeacherMobile,
 } from "./services";
 import { resolveActivationOtpTarget } from "./queries";
 import {
@@ -23,6 +24,7 @@ import {
   resendTeacherInvitationSchema,
   revokeTeacherInvitationSchema,
   teacherTransitionSchema,
+  updateTeacherMobileSchema,
   updateTeacherSchema,
 } from "./schema";
 
@@ -54,6 +56,14 @@ export const updateTeacherAction: FormAction<unknown> = async (_previous, formDa
     revalidateTeachers(result.teacherId);
     return result;
   }, "اطلاعات دبیر به‌روزرسانی شد.");
+
+export const updateTeacherMobileAction: FormAction<unknown> = async (_previous, formData) =>
+  executeAction(async () => {
+    const parsed = updateTeacherMobileSchema.parse(formDataToObject(formData));
+    const result = await updateTeacherMobile({ headers: await headers(), input: parsed });
+    revalidateTeachers(parsed.teacherId);
+    return result;
+  }, "شماره همراه دبیر تغییر کرد و دعوت تازه‌ای صادر شد.");
 
 export const setTeacherMembershipStatusAction: FormAction<unknown> = async (_previous, formData) =>
   executeAction(async () => {
