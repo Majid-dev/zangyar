@@ -9,6 +9,8 @@ import { accounts, schoolMemberships, schools, teacherInvitations, teacherProfil
 import { getEnv } from "@/lib/env";
 import { normalizeIranianMobile } from "@/lib/mobile";
 
+import { verifyOtp } from "@/features/otp/service";
+
 import { requireTeacherManagementAccess } from "./policy";
 import {
   activateTeacherSchema,
@@ -560,6 +562,44 @@ export async function activateTeacher(options: { input: ActivateTeacherInput }) 
   const tokenHash = hashInvitationToken(input.token);
 
   return withProvisioningTransaction(async (tx, authContext) => {
+    // Resolve the invitation first, without consuming it, so the OTP can be
+    // checked against the mobile number the invitation actually belongs to. That
+    // number comes from the invitation row — never from the request, which
+    // carries no mobile at all.
+    const [pending] = await tx
+      .select({
+        id: teacherInvitations.id,
+        schoolId: teacherInvitations.schoolId,
+        membershipId: teacherInvitations.membershipId,
+        mobile: users.phoneNumber,
+      })
+      .from(teacherInvitations)
+      .innerJoin(schoolMemberships, eq(schoolMemberships.id, teacherInvitations.membershipId))
+      .innerJoin(users, eq(users.id, schoolMemberships.userId))
+      .where(and(
+        eq(teacherInvitations.tokenHash, tokenHash),
+        eq(teacherInvitations.status, "PENDING"),
+        gt(teacherInvitations.expiresAt, new Date()),
+      ))
+      .limit(1);
+
+    // Unknown, expired, revoked, and already-used tokens are one response, so the
+    // endpoint cannot be used to probe which links exist.
+    if (!pending || !pending.mobile) throw new Error("This activation link is invalid or has expired.");
+
+    // Prove possession of the mobile number before anything is linked. Verification
+    // joins this transaction, so a later failure restores the code as well as the
+    // token rather than leaving the teacher with a spent code.
+    try {
+      await verifyOtp(
+        { purpose: "TEACHER_ACTIVATION", mobile: pending.mobile, code: input.code },
+        { tx },
+      );
+    } catch {
+      // One message for every verification failure; the reason is not disclosed.
+      throw new Error("The verification code is invalid or has expired.");
+    }
+
     // Conditional update: the row is consumed only if it is still pending and
     // still within its lifetime, which makes single use atomic without a
     // read-then-write race.
@@ -567,7 +607,7 @@ export async function activateTeacher(options: { input: ActivateTeacherInput }) 
       .update(teacherInvitations)
       .set({ status: "CONSUMED", consumedAt: new Date(), updatedAt: new Date() })
       .where(and(
-        eq(teacherInvitations.tokenHash, tokenHash),
+        eq(teacherInvitations.id, pending.id),
         eq(teacherInvitations.status, "PENDING"),
         gt(teacherInvitations.expiresAt, new Date()),
       ))
@@ -577,8 +617,6 @@ export async function activateTeacher(options: { input: ActivateTeacherInput }) 
         membershipId: teacherInvitations.membershipId,
       });
 
-    // Unknown, expired, revoked, and already-used tokens are one response, so
-    // the endpoint cannot be used to probe which links exist.
     if (!invitation) throw new Error("This activation link is invalid or has expired.");
 
     const [membership] = await tx

@@ -52,6 +52,15 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "User not found.": "کاربر پیدا نشد.",
   "A School Admin cannot change their own membership status.": "مدیر مدرسه نمی‌تواند وضعیت عضویت خود را تغییر دهد.",
   "A teacher with this mobile number already belongs to this school.": "دبیری با این شماره همراه از قبل در این مدرسه ثبت شده است.",
+  "A code was sent recently. Try again in": "کد تأیید به‌تازگی ارسال شده است. کمی بعد دوباره تلاش کنید.",
+  "No OTP provider is configured, so codes cannot be issued.": "سامانه‌ی ارسال کد تأیید در دسترس نیست.",
+  "OTP_PROVIDER=development is refused in production: it issues a fixed, publicly known code.": "این تنظیم در محیط عملیاتی مجاز نیست.",
+  "OTP_PROVIDER=sms is reserved but no SMS provider is implemented yet.": "ارسال پیامک هنوز راه‌اندازی نشده است.",
+  "The mobile number is not a valid Iranian mobile number.": "شماره همراه واردشده معتبر نیست.",
+  "The verification code could not be sent.": "ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.",
+  "The verification code is invalid or has expired.": "کد تأیید نامعتبر است یا منقضی شده است.",
+  "This code is invalid or has expired.": "کد تأیید نامعتبر است یا منقضی شده است.",
+  "Too many codes were requested for this number. Try again later.": "تعداد درخواست کد برای این شماره زیاد بوده است. کمی بعد دوباره تلاش کنید.",
   "An activated teacher cannot be invited again.": "این دبیر حساب خود را فعال کرده و نمی‌توان دوباره برای او دعوت فرستاد.",
   "Personnel code is already in use at this school.": "این کد پرسنلی در این مدرسه قبلاً استفاده شده است.",
   "School membership is not active.": "عضویت این کاربر در مدرسه فعال نیست.",
@@ -75,6 +84,16 @@ function transitionMessage(raw: string) {
 }
 
 /**
+ * OTP refusals that carry a retry hint, so the operator learns how long to wait.
+ * These embed a computed number, so they are matched by prefix rather than exactly.
+ */
+function otpThrottleMessage(raw: string) {
+  if (raw.startsWith("A code was sent recently.")) return "کد تأیید به‌تازگی ارسال شده است. کمی بعد دوباره تلاش کنید.";
+  if (raw.startsWith("Too many codes were requested")) return "تعداد درخواست کد برای این شماره زیاد بوده است. کمی بعد دوباره تلاش کنید.";
+  return null;
+}
+
+/**
  * Returns a safe Persian message. Unknown failures deliberately collapse to a
  * generic sentence; the original is logged server-side by the caller.
  */
@@ -86,6 +105,9 @@ export function toUserMessage(error: unknown): { message: string; known: boolean
 
   const transition = transitionMessage(error.message);
   if (transition) return { message: transition, known: true };
+
+  const throttle = otpThrottleMessage(error.message);
+  if (throttle) return { message: throttle, known: true };
 
   return { message: "انجام این عملیات ممکن نشد. لطفاً دوباره تلاش کنید.", known: false };
 }

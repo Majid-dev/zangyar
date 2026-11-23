@@ -46,3 +46,15 @@ It also verifies the invitation lifecycle: the stored value is only the token ha
 One suite (`auth-transaction.integration.test.ts`) covers the transaction binding directly: a failure after identity creation must leave no user or account row behind, and a committed transaction must persist them. That case guards the invariant that provisioning cannot orphan an identity holding a mobile number.
 
 Note: the wrapper passes its suite paths as positional filters to `vitest run`. Passing a bare `--` before them makes vitest ignore the filters and run every suite in the repository, which is why the wrappers pass paths directly.
+
+## OTP verification persisted integration tests
+
+Run `corepack pnpm test:integration:otp`.
+
+This command creates an isolated ephemeral database, applies migrations, runs the persisted OTP suite, then drops the temporary database. It verifies that a code is stored only as a keyed hash, that the mobile is normalized before the challenge is keyed, that the correct code is accepted exactly once, that a wrong code and a missing challenge report the same message, that attempts exhaust the challenge at the ceiling, that an expired code is refused and revoked, that purposes are isolated, that a resend invalidates the previous code, and that the resend cooldown and per-number rate limit refuse with a retry hint.
+
+It also covers tenant linkage (a challenge cannot reference another school's membership) and the HTTP boundary: no code in the response body, an identical response for a known and an unknown number on a non-revealing purpose, session minting through OTP login, a TEACHER_ACTIVATION code refused at the login endpoint, and Better Auth's own `/phone-number/send-otp` still returning 404.
+
+The suite runs with `NODE_ENV=development` because it exercises the Development fixed-code provider, which a production value would correctly refuse. The production refusal itself is covered by unit tests in `src/lib/otp/environment.test.ts` with injected inputs.
+
+Teacher activation now requires a code, so `test:integration:teachers` issues one before completing each activation.

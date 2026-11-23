@@ -21,6 +21,7 @@ erDiagram
     SCHOOLS ||--|| SCHOOL_SETTINGS : configures
     SCHOOL_MEMBERSHIPS ||--o| TEACHER_PROFILES : describes
     SCHOOL_MEMBERSHIPS ||--o{ TEACHER_INVITATIONS : activates
+    SCHOOL_MEMBERSHIPS ||--o{ OTP_CHALLENGES : scopes
 
     SCHOOLS ||--o{ ACADEMIC_YEARS : owns
     SCHOOLS ||--o{ GRADES : defines
@@ -65,6 +66,7 @@ erDiagram
 | `school_settings` | School | One-to-one configuration record; created with or shortly after a school. |
 | `teacher_profiles` | School | One-to-one with a School Membership. Holds teacher-only attributes that are meaningful within a single school, currently the personnel code; unique per school when present. Retained when a teacher is deactivated. |
 | `teacher_invitations` | School | Teacher activation invitations. Status is `PENDING`, `REVOKED`, or `CONSUMED`; expiry is derived from `expiresAt` rather than stored. At most one `PENDING` row per membership. The plaintext token is never stored, only its SHA-256 hash. |
+| `otp_challenges` | School (when tenant-scoped) | One-time codes for mobile verification. Keyed by purpose and normalized number, with attempt count, expiry, and a single-pending rule per purpose and number. Only an HMAC-keyed hash of the code is stored. Separate from Better Auth's `verification` table, which the phone-number plugin fills with plaintext values. |
 
 ### Academic management
 
@@ -121,6 +123,14 @@ Identity, name, slug/code, status, timezone (default `Asia/Tehran`), contact fie
 `teacher_profiles` is one-to-one with a school membership and carries `schoolId`, `membershipId`, `personnelCode`, `firstName`, and `lastName`. `(schoolId, membershipId)` is a composite foreign key into `school_memberships`, so a profile can never describe a membership in another school, and `membershipId` is unique. The personnel code is unique within a school when present, via a partial unique index on `(schoolId, personnelCode) WHERE personnelCode IS NOT NULL`; the same code may exist in another school. Deactivation suspends the membership and leaves the profile row in place.
 
 `teacher_invitations` records the activation lifecycle: `schoolId`, `membershipId`, `tokenHash`, `status`, `expiresAt`, `createdByUserId`, and the `consumedAt` / `revokedAt` / `revokedByUserId` marks. `tokenHash` is a SHA-256 digest of the plaintext token, which is never persisted. `(schoolId, membershipId)` is a composite foreign key into `school_memberships`, and a partial unique index on `(schoolId, membershipId) WHERE status = 'PENDING'` enforces at most one usable invitation per membership. A `PENDING` row past `expiresAt` is read as expired rather than transitioned, so no sweeper is required. Invitation state is separate from membership state and from the user identity: it answers whether activation was completed, not whether the person may access the school.
+
+### `otp_challenges`
+
+`purpose`, `phoneNumber` (canonical `09XXXXXXXXX`), `codeHash` (HMAC-SHA256 hex), `status` (`PENDING`/`CONSUMED`/`REVOKED`/`EXHAUSTED`), `attemptCount`, `maxAttempts`, `expiresAt`, `consumedAt`, `revokedAt`, `provider`, and optional `schoolId`/`membershipId`.
+
+Purpose and number together identify a challenge, so a code issued for one purpose cannot satisfy another, and a partial unique index on `(purpose, phoneNumber) WHERE status = 'PENDING'` allows at most one live challenge. Requesting a new code revokes the current pending row first, which is how a resend invalidates the previous code rather than leaving two usable. A composite foreign key on `(schoolId, membershipId)` into `school_memberships` means a tenant-scoped challenge cannot reference another school's membership. A check constraint keeps `attemptCount` within `maxAttempts`.
+
+This table is deliberately not Better Auth's `verification`: that table has no purpose, attempt ceiling, cooldown, or membership link, and its phone-number plugin writes codes in plaintext.
 
 ### `school_settings` notification policy
 
@@ -191,6 +201,7 @@ Include nullable school, actor user, optional actor membership, action, entity t
 | `school_settings` | Yes | One-to-one school foreign key. |
 | `teacher_profiles` | Yes | Composite reference to the membership's own school; unique membership. |
 | `teacher_invitations` | Yes | Composite reference to the membership's own school; one pending per membership. |
+| `otp_challenges` | Yes (nullable) | Nullable composite reference for tenant-scoped purposes; null for login and password reset, which are not tenant-bound. |
 | `academic_years`, `grades`, `subjects` | Yes | School-scoped unique codes. |
 | `classrooms` | Yes | Composite references to school/year/grade. |
 | `class_teachers` | Yes | Same-school classroom/membership/subject references. |
@@ -223,6 +234,8 @@ school_memberships(school_id, user_id)
 school_memberships(school_id, role, status)
 teacher_profiles(school_id, last_name, first_name) -- partial unique on (school_id, personnel_code) where not null
 teacher_invitations(school_id, membership_id, created_at) -- partial unique pending per membership
+otp_challenges(purpose, phone_number, created_at) -- partial unique pending per purpose+number
+otp_challenges(expires_at) -- for later cleanup of lapsed challenges
 academic_years(school_id, status)
 classrooms(school_id, academic_year_id, grade_id)
 class_teachers(school_id, teacher_membership_id)
@@ -265,6 +278,8 @@ audit_logs(actor_user_id, occurred_at)
 - Teacher activation state is separate from membership state: a membership answers school access, an invitation answers whether activation was completed.
 - A provisioned teacher has no credential account until they complete activation, so no enabled sign-in path can authenticate them beforehand.
 - Invitation tokens are stored hashed and are single-use; resending invalidates every previous token for that membership.
+- OTP codes are stored only as an HMAC-keyed hash and are single-use; requesting a new code invalidates any outstanding one for the same purpose.
+- A verification code is scoped by purpose as well as by number, so a code issued for one flow cannot satisfy another.
 - PostgreSQL range exclusion enforces non-overlapping enrollment ranges; adjacent `[startDate, endDate)` transfers remain valid.
 
 ## Deferred design questions

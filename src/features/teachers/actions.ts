@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
 import { executeAction } from "@/lib/actions/execute";
-import type { ActionResult, ActionState } from "@/lib/actions/result";
+import { actionFailure, type ActionResult, type ActionState } from "@/lib/actions/result";
 import { formDataToObject } from "@/features/academics/form-data";
+import { requestOtp } from "@/features/otp/service";
 
 import {
   activateTeacher,
@@ -15,6 +16,7 @@ import {
   setTeacherMembershipStatus,
   updateTeacher,
 } from "./services";
+import { resolveActivationOtpTarget } from "./queries";
 import {
   activateTeacherSchema,
   createTeacherSchema,
@@ -78,12 +80,35 @@ export const revokeTeacherInvitationAction: FormAction<unknown> = async (_previo
   }, "دعوت لغو شد.");
 
 /**
- * Public activation action.
+ * Issues an activation code for the mobile an invitation link belongs to.
  *
- * Takes no session headers and no tenant identity: the token in the form is the
- * only credential, and the school, user, and role all come from the invitation
- * row it resolves to.
+ * Public by design: the teacher has no session yet, and the invitation token is
+ * the only credential. The mobile is resolved from the token server-side, so the
+ * caller never supplies — or learns — the number. The response is deliberately
+ * uniform whether or not a code was actually sent, so this cannot be used to probe
+ * which numbers exist.
  */
+export const requestActivationCodeAction: FormAction<unknown> = async (_previous, formData) => {
+  const token = String(formData.get("token") ?? "");
+  if (!token) return actionFailure("validation", "پیوند فعال‌سازی معتبر نیست.");
+  return executeAction(async () => {
+    const target = await resolveActivationOtpTarget(token);
+    // An unusable link is reported as such rather than as a delivery problem.
+    if (!target) throw new Error("This activation link is invalid or has expired.");
+
+    await requestOtp({
+      purpose: "TEACHER_ACTIVATION",
+      mobile: target.mobile,
+      schoolId: target.schoolId,
+      membershipId: target.membershipId,
+      context: { schoolName: target.schoolName },
+    });
+
+    // Never returns the code: in development it is written to the server log.
+    return { sent: true };
+  }, "کد تأیید ارسال شد.");
+};
+
 export const activateTeacherAction: FormAction<unknown> = async (_previous, formData) =>
   executeAction(async () =>
     activateTeacher({ input: activateTeacherSchema.parse(formDataToObject(formData)) }),

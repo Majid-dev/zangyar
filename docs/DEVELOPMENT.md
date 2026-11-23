@@ -60,10 +60,30 @@ variable (`DEMO_SCHOOL_NAME`, `DEMO_SCHOOL_SLUG`, `DEMO_ADMIN_NAME`,
 
 ### OTP and SMS
 
-Mobile sign-in is password-based. The phone-number OTP endpoints are disabled
-because no SMS provider is configured yet, and a phone number must be verified
-before it can sign in. Verification state is set by an authorized provisioning
-path such as the development seed or teacher provisioning.
+Mobile sign-in is password-based or by one-time code. A phone number must be
+verified before it can sign in; verification state is set by an authorized
+provisioning path such as the development seed or teacher provisioning.
+
+One-time codes are delivered by the **Development** provider, which issues a
+configured fixed code instead of sending an SMS. **The code is written to the
+server log, not to the browser** — watch the `corepack pnpm dev` terminal for a
+line like:
+
+```text
+[otp:development] purpose=TEACHER_ACTIVATION mobile=0912***789 school="..." code=123456 expiresIn=120s
+```
+
+The default code is `123456`. Override it with `OTP_DEV_FIXED_CODE`. Tune the
+lifetime, attempt ceiling, resend cooldown, and per-number rate limit with
+`OTP_TTL_SECONDS`, `OTP_MAX_ATTEMPTS`, `OTP_RESEND_COOLDOWN_SECONDS`, and
+`OTP_REQUEST_MAX`.
+
+This provider is refused in production: an application booted with
+`NODE_ENV=production` and `OTP_PROVIDER=development` fails at startup, and with
+no provider configured it refuses to issue codes rather than inventing them.
+Selecting `OTP_PROVIDER=sms` is reserved and also refused, because no SMS provider
+is implemented yet. Better Auth's own phone-number OTP routes stay disabled; the
+product's OTP surface is `/otp/*`.
 
 ## Adding a teacher
 
@@ -77,14 +97,28 @@ Sign in as the School Admin and open **دبیران** (`/teachers`).
    only time it is visible: only the token's hash is stored, so the admin must copy
    the link and pass it to the teacher through whatever channel they already use.
    There is no SMS or email delivery yet.
-3. The teacher opens the link and sets their own password. Until then the account
-   exists but **cannot** sign in, because no credential is linked.
+3. The teacher opens the link, requests a verification code, and — once it appears
+   in the server log — submits that code together with a password of their own.
+   Until then the account exists but **cannot** sign in, because no credential is
+   linked.
 4. The teacher detail page (`/teachers/[id]`) shows the invitation status, resends
    or revokes an invitation, edits basic information, and deactivates or
    reactivates the teacher. Resending invalidates the previous link.
 
-Activation links expire after `TEACHER_INVITATION_TTL_HOURS` (default 72). A
-School Admin can never set a teacher's password or change a teacher's role.
+Activation links expire after `TEACHER_INVITATION_TTL_HOURS` (default 72), and
+verification codes after `OTP_TTL_SECONDS` (default 120). A School Admin can never
+set a teacher's password or change a teacher's role.
+
+## Signing in with a one-time code
+
+The login page offers two paths: mobile + password, and mobile + one-time code.
+Choose **کد یک‌بارمصرف**, enter the mobile number, press **ارسال کد تأیید**, then read
+the code from the server log. The request response is identical whether or not the
+number has an account, so it cannot be used to discover which numbers are
+registered.
+
+**بازیابی گذرواژه** (`/reset-password`) uses the same code flow to set a new
+password; a successful reset also revokes that account's other sessions.
 
 ## Verification
 
@@ -103,6 +137,7 @@ never touch local development data:
 corepack pnpm db:test-clean            # migrations apply cleanly to an empty database
 corepack pnpm test:integration:auth    # auth, demo seed, and tenant isolation
 corepack pnpm test:integration:teachers # teacher provisioning and invitation lifecycle
+corepack pnpm test:integration:otp     # OTP issuance, verification, and the production gate
 corepack pnpm test:integration:phase4
 corepack pnpm test:integration:phase5
 corepack pnpm test:integration:phase6

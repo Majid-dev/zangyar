@@ -21,6 +21,8 @@ import {
 import { listTeacherInvitationsForContext, resolveActivationToken } from "./queries";
 import { activateTeacher, createTeacher, resendTeacherInvitation, revokeTeacherInvitation, setTeacherMembershipStatus } from "./services";
 import { hashInvitationToken } from "./tokens";
+import { requestOtp } from "@/features/otp/service";
+import { getOtpConfig } from "@/lib/otp/config";
 
 config({ path: ".env.local" });
 
@@ -111,6 +113,25 @@ async function signInWithPhone(phoneNumber: string, password: string) {
   return response;
 }
 
+/**
+ * Issues a TEACHER_ACTIVATION code for a mobile and returns the fixed development
+ * code, which is what the activation endpoint will accept.
+ *
+ * Activation now requires proving possession of the mobile, so every test that
+ * completes an activation must first challenge the number.
+ */
+async function issueActivationCode(mobile: string) {
+  const config = getOtpConfig();
+  await requestOtp({ purpose: "TEACHER_ACTIVATION", mobile }, { config });
+  return config.fixedCode;
+}
+
+/** Activation input with a freshly issued, valid code. */
+async function activationInput(mobile: string, token: string, password = PASSWORD) {
+  const code = await issueActivationCode(mobile);
+  return { token, code, newPassword: password, confirmPassword: password };
+}
+
 describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
   let admin: Awaited<ReturnType<typeof createSchoolAdmin>>;
 
@@ -143,7 +164,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
     // Before activation the teacher cannot sign in.
     expect((await signInWithPhone("09122220002", PASSWORD)).status).toBe(401);
 
-    const result = await activateTeacher({ input: { token, newPassword: PASSWORD, confirmPassword: PASSWORD } });
+    const result = await activateTeacher({ input: await activationInput("09122220002", token) });
     expect(result.userId).toBeTruthy();
     expect(result.schoolName).toContain("Invitation School");
 
@@ -170,10 +191,10 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
     });
     const token = created.invitation.token;
 
-    await activateTeacher({ input: { token, newPassword: PASSWORD, confirmPassword: PASSWORD } });
-    await expect(
-      activateTeacher({ input: { token, newPassword: PASSWORD, confirmPassword: PASSWORD } }),
-    ).rejects.toThrow("This activation link is invalid or has expired.");
+    const input = await activationInput("09122220003", token);
+    await activateTeacher({ input });
+    // The same code and token are replayed; both are already spent.
+    await expect(activateTeacher({ input })).rejects.toThrow("This activation link is invalid or has expired.");
 
     // The second attempt linked nothing extra.
     const [user] = await getDb().select({ id: users.id }).from(users).where(eq(users.phoneNumber, "09122220003"));
@@ -186,7 +207,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
 
   it("rejects an unknown token with the same message as an expired one", async () => {
     await expect(
-      activateTeacher({ input: { token: "not-a-real-token-value", newPassword: PASSWORD, confirmPassword: PASSWORD } }),
+      activateTeacher({ input: { token: "not-a-real-token-value", code: "123456", newPassword: PASSWORD, confirmPassword: PASSWORD } }),
     ).rejects.toThrow("This activation link is invalid or has expired.");
   });
 
@@ -197,8 +218,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
     });
     const token = created.invitation.token;
 
-    // A second credential would be a conflict; force one by activating twice.
-    await activateTeacher({ input: { token, newPassword: PASSWORD, confirmPassword: PASSWORD } });
+    await activateTeacher({ input: await activationInput("09122220004", token) });
 
     const [row] = await getDb().select().from(teacherInvitations).where(eq(teacherInvitations.id, created.invitation.id));
     // Consumed exactly once, and the failed retry above did not un-consume it.
@@ -219,7 +239,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
       .where(eq(teacherInvitations.id, created.invitation.id));
 
     await expect(
-      activateTeacher({ input: { token: created.invitation.token, newPassword: PASSWORD, confirmPassword: PASSWORD } }),
+      activateTeacher({ input: await activationInput("09122220005", created.invitation.token) }),
     ).rejects.toThrow("This activation link is invalid or has expired.");
 
     const preview = await resolveActivationToken(created.invitation.token);
@@ -243,14 +263,16 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
     const resent = await resendTeacherInvitation({ headers: admin.headers, input: { teacherId: created.teacherId } });
     expect(resent.token).not.toBe(firstToken);
 
-    // The old link is dead.
+    // The old link is dead. It fails at the invitation lookup, before the code is
+    // ever examined, so no fresh code is needed (and issuing one would collide
+    // with the resend cooldown for this number).
     await expect(
-      activateTeacher({ input: { token: firstToken, newPassword: PASSWORD, confirmPassword: PASSWORD } }),
+      activateTeacher({ input: { token: firstToken, code: "123456", newPassword: PASSWORD, confirmPassword: PASSWORD } }),
     ).rejects.toThrow("This activation link is invalid or has expired.");
 
     // The new one works.
     await expect(
-      activateTeacher({ input: { token: resent.token, newPassword: PASSWORD, confirmPassword: PASSWORD } }),
+      activateTeacher({ input: await activationInput("09122220006", resent.token) }),
     ).resolves.toBeTruthy();
 
     // Exactly one invitation was ever usable at a time.
@@ -298,7 +320,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
     await revokeTeacherInvitation({ headers: admin.headers, input: { teacherId: created.teacherId } });
 
     await expect(
-      activateTeacher({ input: { token: created.invitation.token, newPassword: PASSWORD, confirmPassword: PASSWORD } }),
+      activateTeacher({ input: await activationInput("09122220008", created.invitation.token) }),
     ).rejects.toThrow("This activation link is invalid or has expired.");
 
     // Revoking again reports that there is nothing left to revoke.
@@ -316,7 +338,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
     await setTeacherMembershipStatus({ headers: admin.headers, input: { teacherId: created.teacherId, status: "SUSPENDED" } });
 
     await expect(
-      activateTeacher({ input: { token: created.invitation.token, newPassword: PASSWORD, confirmPassword: PASSWORD } }),
+      activateTeacher({ input: await activationInput("09122220009", created.invitation.token) }),
     ).rejects.toThrow("This activation link is invalid or has expired.");
 
     const preview = await resolveActivationToken(created.invitation.token);
@@ -328,7 +350,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
       headers: admin.headers,
       input: { firstName: "هدیه", lastName: "جعفری", mobile: "09122220010" },
     });
-    await activateTeacher({ input: { token: created.invitation.token, newPassword: PASSWORD, confirmPassword: PASSWORD } });
+    await activateTeacher({ input: await activationInput("09122220010", created.invitation.token) });
 
     await expect(
       resendTeacherInvitation({ headers: admin.headers, input: { teacherId: created.teacherId } }),
@@ -340,7 +362,7 @@ describe.skipIf(!canRun)("teacher invitation lifecycle", () => {
       headers: admin.headers,
       input: { firstName: "فرهاد", lastName: "زمانی", mobile: "09122220011" },
     });
-    await activateTeacher({ input: { token: created.invitation.token, newPassword: PASSWORD, confirmPassword: PASSWORD } });
+    await activateTeacher({ input: await activationInput("09122220011", created.invitation.token) });
 
     // The credential survives suspension, so authentication still succeeds...
     const signedIn = await signInWithPhone("09122220011", PASSWORD);

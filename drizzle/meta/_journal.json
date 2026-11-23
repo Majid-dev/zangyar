@@ -43,6 +43,13 @@
       "when": 1796006400000,
       "tag": "0005_teacher_provisioning",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1796604800000,
+      "tag": "0006_otp_challenges",
+      "breakpoints": true
     }
   ]
 }

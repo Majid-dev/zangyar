@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { toAsciiDigits } from "@/lib/digits";
 import { isValidIranianMobile, normalizeIranianMobile } from "@/lib/mobile";
 
 import { effectiveInvitationStatus, type EffectiveInvitationStatus, type MembershipStatus } from "./status";
@@ -62,6 +63,12 @@ const password = z
 export const activateTeacherSchema = z
   .object({
     token: z.string().trim().min(1, "پیوند فعال‌سازی معتبر نیست."),
+    // The code is normalized through the same digit conversion as every other
+    // Persian input, so a code typed with Persian digits is accepted.
+    code: z.preprocess(
+      (value) => (typeof value === "string" ? toAsciiDigits(value).replace(/\s/g, "") : value),
+      z.string().regex(/^\d{4,10}$/, "کد تأیید باید فقط رقم باشد."),
+    ),
     newPassword: password,
     confirmPassword: z.string(),
   })

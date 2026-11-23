@@ -135,6 +135,18 @@ Teacher provisioning writes identity rows inside the same transaction as the dom
 
 Deactivation suspends the membership rather than deleting anything: every authorization check reads an active membership, so access ends immediately while the teacher record and history are retained. A suspended teacher keeps their credential and can still authenticate, but holds no active membership, so school authorization denies them — the intended end state.
 
+### OTP verification
+
+`src/lib/otp/` is a provider-independent layer for one-time codes. Business logic depends only on the `OtpProvider` interface — `issueCode()` plus `send()` — and the concrete provider is chosen by configuration in `selection.ts`, the single place that knows which providers exist. A real SMS provider is added later by implementing that interface and extending the selection function, with no change to the OTP service, the activation flow, or the UI. There is no separate `SmsProvider`: an SMS provider is an implementation of `OtpProvider`.
+
+The MVP ships one provider: a Development-only fixed-code implementation that issues a configured constant and writes it to the server log. It is never rendered to a browser, and it cannot be selected in production — the gate in `src/lib/otp/environment.ts` runs from `authOptions()`, so an unsafe production configuration fails at startup rather than on first use. A missing provider is not a startup failure; it is refused when a code is actually requested, which is what lets a production build and boot succeed with no OTP configuration.
+
+Challenges live in `otp_challenges`, keyed by purpose and normalized number, with only an HMAC-keyed hash of the code stored. This is deliberately separate from Better Auth's `verification` table, whose phone-number plugin stores codes in plaintext and has no purpose, attempt ceiling, cooldown, or membership link; those `/phone-number/*` routes stay disabled. Verification is single-use under a row lock, and a failed attempt commits its incremented counter on its own connection — a counter written inside a transaction that then aborts would be rolled back and would permit unlimited guessing.
+
+`/otp/request`, `/otp/verify`, `/otp/login`, and `/otp/reset-password` are Better Auth plugin endpoints (`src/lib/auth/otp-plugin.ts`) rather than Server Actions, because login must set the session cookie and that needs an endpoint context. For login and password reset the request response is uniform whether or not an account exists, so it cannot enumerate members. Purposes are `TEACHER_ACTIVATION`, `LOGIN`, and `PASSWORD_RESET`.
+
+Better Auth's own OTP paths stay closed and `sendOTP` stays a no-op; the plugin's `requireVerification` remains in force, so a phone still has to be verified to sign in with a password.
+
 ### Known authorization gaps
 
 These are recorded, not yet closed, and are outside the current slice:
@@ -145,6 +157,8 @@ These are recorded, not yet closed, and are outside the current slice:
 - Re-inviting a previously revoked member has no dedicated path and currently surfaces as a uniqueness conflict. (Teacher provisioning now restores a suspended or revoked membership instead, and issues a fresh invitation; the gap remains for non-teacher memberships.)
 - `class_teachers.teacher_membership_id` enforces same-school membership at the database level, but the teacher-role requirement is enforced in the service layer only. The same applies to `teacher_profiles.membership_id`: a foreign key cannot express "this membership has the TEACHER role".
 - `/sign-up/email` remains enabled because several existing integration suites depend on it. It creates a user with no membership, which `getSchoolContext` refuses as `NO_SCHOOL`, so it is not a tenant bypass — but it is an unauthenticated account-creation surface and should be reviewed before production.
+- OTP login mints a session for any account with a verified mobile number, including one with no school membership. That holder then sees the `NO_SCHOOL` access state, which is consistent with how a memberless session is already treated — but it does mean a session can exist for a user with no school.
+- A failed verification's attempt counter is committed on a separate connection from the caller's transaction. That is deliberate (see above), but it means the counter write is not atomic with the caller's own rollback.
 
 
 ## Audit architecture
@@ -187,6 +201,14 @@ Remaining Phase 3 work: continue domain-specific resource-ownership cases as lat
 Teacher invitation and account provisioning is complete: School Admin teacher management (list with name and mobile search and filters by membership status and invitation status, add, edit, view), the invitation lifecycle (issue, resend invalidating previous tokens, revoke, expiry), activation through a public one-time link, and deactivation and reactivation via membership status. Persisted coverage runs through `corepack pnpm test:integration:teachers` in an ephemeral migrated database and includes a transaction-atomicity case proving a rolled-back provisioning leaves no orphan identity.
 
 Known limits in this slice: the activation link is delivered by the admin because no SMS or email provider exists; there is no last-admin protection; and the teacher-role requirement on a profile's membership is enforced in the service layer only.
+
+### OTP verification slice
+
+OTP verification is complete: a provider-independent service whose delivery provider is selected by configuration, a Development-only fixed-code provider, purpose-specific challenges (`TEACHER_ACTIVATION`, `LOGIN`, `PASSWORD_RESET`) with keyed-hashed storage, expiry, attempt ceilings, resend cooldown, and per-number rate limiting, plus a production gate that refuses the fixed-code provider at startup. Teacher activation now requires a valid code before a credential is linked, and OTP login and password reset are wired end to end.
+
+Persisted coverage runs through `corepack pnpm test:integration:otp` in an ephemeral migrated database, covering issuance, keyed-hashed storage, one-time use, expiry, attempt exhaustion, purpose isolation, resend cooldown, rate limiting, tenant-scoped linkage, anti-enumeration, and session minting. Unit tests cover the pure policy and the production gate with injected inputs.
+
+Known limits: no real SMS provider yet (the `sms` name is reserved and refused rather than faked); expired challenges are retained rather than swept, with an index in place for a future cleanup job; and email/password reset through Better Auth's own routes remains disabled in favour of the OTP flow.
 
 ## Phase 4 implementation status
 

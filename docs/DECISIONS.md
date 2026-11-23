@@ -180,6 +180,28 @@ This file records product and architecture decisions for the initial MVP. Decisi
 
 **Consequences:** Reads that show a teacher join the profile. Deactivation and reactivation continue to act on the membership, so the profile row is retained rather than deleted, consistent with the archive-over-delete rule. The database cannot express "this membership has the TEACHER role" through a foreign key, so that requirement stays enforced in the service layer, the same known gap already recorded for `class_teachers`.
 
+## ADR-023: Make OTP challenges purpose-specific and store them keyed-hashed
+
+**Status:** Accepted
+
+**Decision:** One-time codes are held in `otp_challenges`, keyed by `purpose` (`TEACHER_ACTIVATION`, `LOGIN`, `PASSWORD_RESET`) as well as by normalized mobile number. Only a keyed hash of the code is stored: HMAC-SHA256 under a server-side secret, compared with `timingSafeEqual`. Challenges carry their own attempt ceiling, expiry, and resend cooldown, and may be linked to a school membership. Delivery goes through an `OtpProvider` interface selected by configuration, with a Development-only fixed-code provider for the MVP.
+
+**Rationale:** Better Auth's phone-number plugin already implements OTP storage, but it stores the code in plaintext (`code:attempts` in the `verification` table), has no purpose concept, no resend cooldown, and no way to associate a challenge with a membership — so it cannot satisfy purpose-specific verification, per-purpose throttling, or tenant-scoped activation. Keeping a separate table also stops us depending on a third party's internal storage format.
+
+The hash is keyed because the code space is small: a six-digit code has only 10^6 values, so an unkeyed digest would be exhaustible offline in milliseconds from a single leaked row. This is the opposite of the reasoning for invitation tokens in ADR-019's slice, which are 256-bit random values and therefore correctly stored under a plain SHA-256.
+
+**Consequences:** Codes are never recoverable from the database, and the plaintext appears only in the provider's delivery call — in development, a single server-log line. Verification is single-use under a row lock, and a failed attempt commits its incremented counter on its own connection, because a counter written inside a transaction that then aborts would be rolled back and would allow unlimited guesses. Purposes are separated at the storage key, so a code issued for one flow cannot satisfy another.
+
+## ADR-024: Refuse the fixed-code OTP provider in production
+
+**Status:** Accepted
+
+**Decision:** The Development OTP provider issues a configured fixed code. Provider selection is configuration-driven, and an unsafe configuration is refused before it can run: `development` in production throws unconditionally at startup, with no override; the reserved `sms` name throws rather than silently falling back; and a missing provider fails closed when a code is requested. When no provider is configured, the production default is `none`, which is tolerated at startup so an ordinary build and boot still succeed without OTP configuration.
+
+**Rationale:** A fixed, publicly known verification code is exactly what makes local development workable and exactly what must never be reachable in production. The distinction between "unsafe configuration" (refuse at startup) and "no provider configured" (refuse at request time) is what keeps a production build honest without making it impossible to boot.
+
+**Consequences:** `pnpm build` succeeds with no OTP variables set, while `OTP_PROVIDER=development` in production fails fast. Provider-specific settings — the fixed code, the hash secret — stay inside the OTP layer and never reach business logic or a lognable summary. Adding a real SMS provider means implementing `OtpProvider` and extending the selection function; no change to the OTP service, the activation flow, or the UI. This follows ADR-009's "provider boundary first, real provider only after requirements are confirmed" for the same reason.
+
 ## ADR-012: Preserve historical records through status and archive transitions
 
 **Status:** Accepted
@@ -198,7 +220,7 @@ This file records product and architecture decisions for the initial MVP. Decisi
 
 **Rationale:** Schools know staff by mobile number, and mobile is the identifier SMS delivery already uses. One canonical format prevents the same person from existing twice because of how their number was typed.
 
-**Consequences:** `email` remains required and unique because Better Auth identity rows and account provisioning still provide one; it is not a login credential on the product surface. OTP endpoints are disabled because no SMS provider exists yet, so verification state is set by an authorized provisioning path rather than by self-service OTP.
+**Consequences:** `email` remains required and unique because Better Auth identity rows and account provisioning still provide one; it is not a login credential on the product surface. Better Auth's own OTP endpoints remain disabled — its storage is plaintext, purpose-less, and has no cooldown — and self-service mobile verification for teachers is served instead by the OTP service in ADR-023, whose challenges are purpose-specific and keyed-hashed.
 
 ## ADR-020: Restrict the demo tenant bootstrap to development
 

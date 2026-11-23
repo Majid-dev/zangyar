@@ -60,7 +60,15 @@ This roadmap separates product/design decisions from implementation work. Produc
 - Deactivation and reactivation through membership status, with the teacher's credential kept and school access withdrawn.
 - Persisted coverage via `test:integration:teachers`, including a transaction-atomicity case for rollback of identity creation.
 
-**Remaining:** Platform Admin operations, multi-school school switching, school-status enforcement on every read path, last-admin protection, and a membership re-invite path for non-teacher memberships. See the known authorization gaps in `docs/ARCHITECTURE.md`.
+### OTP verification infrastructure
+
+- Provider-independent OTP service: `OtpProvider` interface, configuration-selected implementation, and a Development-only fixed-code provider.
+- Purpose-specific challenges (`TEACHER_ACTIVATION`, `LOGIN`, `PASSWORD_RESET`) with keyed-hashed storage, expiry, attempt ceilings, resend cooldown, and per-number rate limiting.
+- Production gate: the fixed-code provider is refused at startup, with no override; a missing provider fails closed at request time.
+- Teacher activation now requires a valid code before any credential is linked; OTP login and password reset are wired end to end.
+- Persisted coverage via `test:integration:otp`.
+
+**Remaining:** a real SMS provider (the `sms` provider name is reserved and currently refused), expired-challenge cleanup, and Platform Admin operations. See the known authorization gaps in `docs/ARCHITECTURE.md`.
 
 **Exit criteria:** Protected operations reject unauthenticated users, invalid memberships, wrong roles, wrong tenants, and unauthorized resource access.
 

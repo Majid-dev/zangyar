@@ -9,6 +9,10 @@ import { getDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
 import { isValidIranianMobile, normalizeIranianMobile } from "@/lib/mobile";
+import { getOtpConfig } from "@/lib/otp/config";
+import { assertOtpConfigurationSafe, currentOtpEnvironment } from "@/lib/otp/environment";
+
+import { otpPlugin } from "./otp-plugin";
 
 /** Placeholder mail domain for accounts whose login identity is a mobile number. */
 export const MOBILE_ACCOUNT_EMAIL_DOMAIN = "mobile.zangyar.local";
@@ -35,6 +39,20 @@ type AuthDatabase = Parameters<typeof drizzleAdapter>[0];
  */
 export function authOptions(database: AuthDatabase, overrides: { transaction?: boolean } = {}): BetterAuthOptions {
   const env = getEnv();
+
+  // Fail startup on an unsafe OTP configuration. This runs here, in the single
+  // configuration factory both `getAuth()` and `getAuthForTransaction()` use, so a
+  // production deployment that tries to select the fixed-code development
+  // provider is refused when the app boots rather than when someone first asks
+  // for a code. A missing provider is not a startup failure — it is reported when
+  // a code is actually requested.
+  const otpConfig = getOtpConfig();
+  assertOtpConfigurationSafe({
+    ...currentOtpEnvironment(),
+    provider: otpConfig.provider,
+    fixedCode: otpConfig.fixedCode,
+    hashSecret: otpConfig.hashSecret,
+  });
 
   return {
     baseURL: env.BETTER_AUTH_URL,
@@ -76,17 +94,19 @@ export function authOptions(database: AuthDatabase, overrides: { transaction?: b
         // A phone number must be verified before it can sign in. Verification
         // state is set by an authorized provisioning path (the development seed
         // marks the demo account verified, teacher provisioning marks a new
-        // teacher verified); no OTP is sent because no SMS provider exists yet.
+        // teacher verified).
         requireVerification: true,
-        // No SMS provider exists yet. Login for an unverified number is refused
-        // as "not verified" rather than raising an internal error, and the OTP
-        // endpoints that would deliver a code are disabled above.
+        // The plugin's own OTP delivery stays a no-op and its four routes stay
+        // disabled below. Verification by code is served by the zangyar-otp plugin
+        // instead, because the plugin's storage is plaintext, purpose-less, and
+        // has no resend cooldown. See docs/DECISIONS.md.
         sendOTP: () => {},
         signUpOnVerification: {
           getTempEmail: (value: string) => mobileAccountEmail(normalizeIranianMobile(value) ?? value),
           getTempName: (value: string) => normalizeIranianMobile(value) ?? value,
         },
       }),
+      otpPlugin(),
     ],
   };
 }

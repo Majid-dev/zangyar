@@ -89,7 +89,12 @@ export default async function ActivateTeacherPage({ params }: { params: Promise<
             <h2 className="mt-2 text-3xl font-black tracking-tight text-primary">تعیین گذرواژه</h2>
           </div>
 
-          <TeacherActivationForm token={token} teacherName={preview.teacherName} schoolName={preview.schoolName} />
+          <TeacherActivationForm
+            token={token}
+            teacherName={preview.teacherName}
+            schoolName={preview.schoolName}
+            maskedMobile={preview.maskedMobile}
+          />
         </div>
       </section>
     </main>

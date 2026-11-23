@@ -255,6 +255,49 @@ export async function getTeacherForContextOrThrow(context: ActiveSchoolMembershi
   return teacher;
 }
 
+/**
+ * Resolves the mobile an activation token belongs to, for issuing a code.
+ *
+ * Server-only by intent: the raw number is returned here and nowhere else, so the
+ * browser never learns it. The OTP step is addressed by the token server-side,
+ * which is why the activation form has no mobile field at all.
+ */
+export async function resolveActivationOtpTarget(token: string) {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      mobile: users.phoneNumber,
+      schoolId: schoolMemberships.schoolId,
+      membershipId: schoolMemberships.id,
+      schoolName: schools.name,
+      invitationStatus: teacherInvitations.status,
+      invitationExpiresAt: teacherInvitations.expiresAt,
+      membershipStatus: schoolMemberships.status,
+    })
+    .from(teacherInvitations)
+    .innerJoin(schoolMemberships, eq(schoolMemberships.id, teacherInvitations.membershipId))
+    .innerJoin(users, eq(users.id, schoolMemberships.userId))
+    .innerJoin(schools, eq(schools.id, teacherInvitations.schoolId))
+    .where(and(
+      eq(teacherInvitations.tokenHash, hashInvitationToken(token)),
+      eq(schoolMemberships.schoolId, teacherInvitations.schoolId),
+    ))
+    .limit(1);
+
+  if (!row) return null;
+
+  const status = effectiveInvitationStatus({ status: row.invitationStatus, expiresAt: row.invitationExpiresAt });
+  if (status !== "PENDING" || row.membershipStatus !== "ACTIVE") return null;
+  if (!row.mobile) return null;
+
+  return {
+    mobile: row.mobile,
+    schoolId: row.schoolId,
+    membershipId: row.membershipId,
+    schoolName: row.schoolName,
+  };
+}
+
 export async function listTeacherInvitationsForContext(
   context: ActiveSchoolMembership,
   teacherId: string,
@@ -303,12 +346,16 @@ export async function resolveActivationToken(token: string) {
       firstName: teacherProfiles.firstName,
       lastName: teacherProfiles.lastName,
       membershipStatus: schoolMemberships.status,
+      membershipId: schoolMemberships.id,
+      schoolId: schoolMemberships.schoolId,
       schoolName: schools.name,
+      mobile: users.phoneNumber,
     })
     .from(teacherInvitations)
     .innerJoin(schoolMemberships, eq(schoolMemberships.id, teacherInvitations.membershipId))
     .innerJoin(teacherProfiles, eq(teacherProfiles.membershipId, teacherInvitations.membershipId))
     .innerJoin(schools, eq(schools.id, teacherInvitations.schoolId))
+    .innerJoin(users, eq(users.id, schoolMemberships.userId))
     .where(and(
       eq(teacherInvitations.tokenHash, hashInvitationToken(token)),
       eq(schoolMemberships.schoolId, teacherInvitations.schoolId),
@@ -324,6 +371,10 @@ export async function resolveActivationToken(token: string) {
     // Only the school the invitation belongs to: the page must not reveal any
     // other tenant the person might also belong to.
     schoolName: row.schoolName,
+    // Masked for display, and only for this invitation's own record. The full
+    // number is never sent to the browser: the OTP step is addressed by the token
+    // server-side, so the client never needs to know it.
+    maskedMobile: maskIranianMobile(row.mobile),
     usable: status === "PENDING" && row.membershipStatus === "ACTIVE",
     status,
   };

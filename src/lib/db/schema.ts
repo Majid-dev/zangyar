@@ -29,6 +29,8 @@ export const membershipRole = pgEnum("membership_role", ["SCHOOL_ADMIN", "TEACHE
 export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED"]);
 export const academicYearStatus = pgEnum("academic_year_status", ["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]);
 export const teacherInvitationStatus = pgEnum("teacher_invitation_status", ["PENDING", "REVOKED", "CONSUMED"]);
+export const otpPurpose = pgEnum("otp_purpose", ["TEACHER_ACTIVATION", "LOGIN", "PASSWORD_RESET"]);
+export const otpChallengeStatus = pgEnum("otp_challenge_status", ["PENDING", "CONSUMED", "REVOKED", "EXHAUSTED"]);
 export const recordStatus = pgEnum("record_status", ["ACTIVE", "ARCHIVED"]);
 export const studentStatus = pgEnum("student_status", ["ACTIVE", "WITHDRAWN", "GRADUATED", "ARCHIVED"]);
 export const attendanceSessionKind = pgEnum("attendance_session_kind", ["DAILY", "LESSON"]);
@@ -195,6 +197,54 @@ export const teacherInvitations = pgTable("teacher_invitations", {
   // pending row before inserting, so the slot is always freed first.
   uniqueIndex("teacher_invitations_one_pending_per_membership_idx").on(table.schoolId, table.membershipId).where(sql`status = 'PENDING'`),
   index("teacher_invitations_school_membership_idx").on(table.schoolId, table.membershipId, table.createdAt),
+]);
+
+/**
+ * One-time OTP challenges.
+ *
+ * Deliberately separate from Better Auth's `verification` table (which the
+ * phone-number plugin owns and fills with plaintext `code:attempts` values):
+ * that table has no purpose, no attempt ceiling, no resend cooldown, and no way
+ * to associate a challenge with a school membership. A challenge here is keyed
+ * by purpose as well as number, so a code issued for one purpose cannot satisfy
+ * another.
+ *
+ * Only a keyed hash of the code is stored — never the code itself. A six-digit
+ * code has 10^6 possible values, so a bare hash would be brute-forced offline in
+ * milliseconds if a row leaked; the hash is HMAC-peppered with a server secret
+ * for that reason.
+ */
+export const otpChallenges = pgTable("otp_challenges", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  purpose: otpPurpose("purpose").notNull(),
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  codeHash: char("code_hash", { length: 64 }).notNull(),
+  status: otpChallengeStatus("status").default("PENDING").notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  maxAttempts: integer("max_attempts").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+  // Which provider delivered the code, for later attempt analysis. The provider's
+  // own settings never reach the database.
+  provider: varchar("provider", { length: 64 }).notNull(),
+  // Present only for purposes tied to a tenant, such as teacher activation.
+  schoolId: uuid("school_id"),
+  membershipId: uuid("membership_id"),
+  ...timestamps,
+}, (table) => [
+  // At most one live challenge per purpose and number. A new request revokes the
+  // current pending row first, which is how "invalidate previously issued OTPs"
+  // is enforced rather than merely documented.
+  uniqueIndex("otp_challenges_one_pending_idx").on(table.purpose, table.phoneNumber).where(sql`status = 'PENDING'`),
+  index("otp_challenges_purpose_phone_created_idx").on(table.purpose, table.phoneNumber, table.createdAt),
+  index("otp_challenges_expires_idx").on(table.expiresAt),
+  foreignKey({
+    columns: [table.schoolId, table.membershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "otp_challenges_school_membership_fk",
+  }).onDelete("restrict"),
+  check("otp_challenges_attempts_check", sql`${table.attemptCount} >= 0 and ${table.attemptCount} <= ${table.maxAttempts}`),
 ]);
 
 export const academicYears = pgTable("academic_years", {
