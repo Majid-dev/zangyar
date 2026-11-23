@@ -18,7 +18,6 @@ import {
   transitionStudentAction,
   updateGuardianAction,
   updateStudentAction,
-  updateStudentGuardianAction,
 } from "../actions";
 
 const studentStatusLabels = { ACTIVE: "فعال", WITHDRAWN: "ترک‌تحصیل", GRADUATED: "فارغ‌التحصیل", ARCHIVED: "بایگانی‌شده" } as const;
@@ -152,7 +151,15 @@ export function GuardianPanel({ studentId, guardians }: { studentId: string; gua
               <Field label="نام خانوادگی"><Input name="lastName" defaultValue={guardian.lastName} required /></Field>
               <Field label="شماره همراه"><Input name="normalizedMobile" defaultValue={guardian.normalizedMobile ?? ""} inputMode="tel" dir="ltr" className="text-start" /></Field>
               <Field label="ایمیل" hint="اختیاری"><Input name="email" type="email" defaultValue={guardian.email ?? ""} dir="ltr" className="text-start" /></Field>
-              <div className="flex items-end gap-2 sm:col-span-2"><SubmitButton size="sm" pendingLabel="در حال ذخیره…">ذخیره</SubmitButton><Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(null)}>بستن</Button></div>
+              <div className="sm:col-span-2">
+                <GuardianRelationshipField label="رابطه" name="relationshipType" value={guardian.relationshipType} />
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-bold text-primary sm:col-span-2">
+                <label className="flex items-center gap-2"><input type="checkbox" name="isPrimary" defaultChecked={guardian.isPrimary} className="size-4" /> اصلی</label>
+                <label className="flex items-center gap-2"><input type="checkbox" name="receivesSms" defaultChecked={guardian.receivesSms} className="size-4" /> پیامک</label>
+                <label className="flex items-center gap-2"><input type="checkbox" name="isEmergency" defaultChecked={guardian.isEmergency} className="size-4" /> اضطراری</label>
+              </div>
+              <div className="flex items-center gap-2 sm:col-span-2"><SubmitButton size="sm" pendingLabel="در حال ذخیره…">ذخیره</SubmitButton><Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(null)}>بستن</Button></div>
             </ActionForm>
           ) : (
             <>
@@ -169,16 +176,7 @@ export function GuardianPanel({ studentId, guardians }: { studentId: string; gua
                   <Button type="button" size="sm" variant="ghost" onClick={() => setEditingId(guardian.id)}>ویرایش</Button>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-border pt-3">
-                <ActionForm action={updateStudentGuardianAction} className="flex flex-wrap items-end gap-3">
-                  <input type="hidden" name="studentId" value={studentId} />
-                  <input type="hidden" name="guardianId" value={guardian.id} />
-                  <GuardianRelationshipField label="رابطه" name="relationshipType" value={guardian.relationshipType} />
-                  <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="isPrimary" defaultChecked={guardian.isPrimary} className="size-4" /> اصلی</label>
-                  <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="receivesSms" defaultChecked={guardian.receivesSms} className="size-4" /> پیامک</label>
-                  <label className="flex items-center gap-2 pb-2 text-xs font-bold text-primary"><input type="checkbox" name="isEmergency" defaultChecked={guardian.isEmergency} className="size-4" /> اضطراری</label>
-                  <div className="pb-1"><SubmitButton size="sm" variant="secondary" pendingLabel="…">ذخیره رابطه</SubmitButton></div>
-                </ActionForm>
+              <div className="mt-3 flex items-center border-t border-border pt-3">
                 <GuardianArchiveAction guardianId={guardian.id} studentId={studentId} status={guardian.status} />
               </div>
             </>
