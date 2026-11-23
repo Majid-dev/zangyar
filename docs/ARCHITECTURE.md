@@ -73,8 +73,13 @@ PostgreSQL Row Level Security may be considered later as defense in depth. It sh
 - Validate every external input with Zod before domain logic runs.
 - Keep database access in server-only modules.
 - Keep SMS provider calls outside the attendance transaction.
+- Server Actions return the typed `ActionResult` union (`ok`, error kind, safe message, and optional field errors) instead of exposing thrown database or implementation errors to the UI. Domain services remain presentation-neutral; translation and safe logging happen at the action boundary.
 
-## Transaction boundaries
+### Shared application shell
+
+Authenticated routes use one shared `(app)` layout for the persistent sidebar, responsive mobile drawer, school context, and role-filtered navigation. Navigation visibility is presentation only; every destination retains its own server-side authorization. Back links use explicit parent routes rather than `router.back()`, so direct URL entry cannot create history loops or ambiguous navigation.
+
+### Transaction boundaries
 
 ### Attendance
 
@@ -100,7 +105,9 @@ A separate processor claims pending outbox items, sends through an `SmsProvider`
 - Display dates using Persian-friendly formatting in the UI without changing stored instants.
 - Do not derive attendance day boundaries from the server's local timezone.
 
-User-facing forms may accept Persian-calendar dates and convert them to Gregorian dates at the application boundary. Student, guardian, relationship, and enrollment mutations are owned by `src/features/students` and derive tenant identity from verified membership context. Teachers read students only through active, date-effective classroom assignments; teacher projections omit sensitive guardian contact data. Enrollment transfers use effective date ranges: close the previous enrollment and create the next one without overlapping ranges for the same student and academic year. PostgreSQL exclusion enforcement protects this invariant under concurrent writes.
+User-facing forms may accept Persian-calendar dates and convert them to Gregorian dates at the application boundary. The reusable Jalali picker submits a hidden Gregorian ISO date while displaying Persian month names, digits, and weekday labels; date-only conversion uses UTC components to avoid timezone day shifts. Student, guardian, relationship, and enrollment mutations are owned by `src/features/students` and derive tenant identity from verified membership context. Teachers read students only through active, date-effective classroom assignments; teacher projections omit sensitive guardian contact data. Enrollment transfers use effective date ranges: close the previous enrollment and create the next one without overlapping ranges for the same student and academic year. PostgreSQL exclusion enforcement protects this invariant under concurrent writes.
+
+Academic-year closure is one server-owned transaction: transition the year to `CLOSED`, archive only its active enrollments at the year end, retain terminal enrollments and student profile status, and write audit events. A compare-and-set status update prevents stale concurrent decisions; repeated `CLOSED → CLOSED` requests are legal idempotent no-ops. Operational classroom queries hide closed/archived-year rooms while historical rows remain queryable by explicit history paths. New classroom and enrollment services reject closed/archived years server-side.
 
 ## Authentication and roles
 
@@ -145,13 +152,13 @@ Remaining Phase 3 work: complete persisted authorization verification and contin
 
 ## Phase 4 implementation status
 
-Phase 4 school and academic management is complete. School Admin operations are authenticated, tenant-scoped, operational-school restricted, and audited. Academic years use guarded lifecycle transitions. Grades, subjects, and classrooms enforce same-school relationships and reject archived catalog records. Teacher assignments require active same-tenant teacher memberships, valid academic-year date windows, active subjects, and duplicate protection. Academic management pages expose school settings, academic years, catalogs, classrooms, and teacher assignment forms. Classroom assignment reads filter inactive records and batch tenant-scoped data loading.
+Phase 4 school and academic management is complete. School Admin operations are authenticated, tenant-scoped, operational-school restricted, and audited. Academic years use guarded lifecycle transitions; closing a year atomically archives its active enrollments, preserves student profiles and history, hides its classrooms from operational lists, and rejects new classrooms/enrollments. Grades, subjects, and classrooms enforce same-school relationships and reject archived catalog records. Teacher assignments require active same-tenant teacher memberships, valid academic-year date windows, active subjects, and duplicate protection. Academic management pages expose school settings, academic years, catalogs, classrooms, and teacher assignment forms. Classroom assignment reads filter inactive records and batch tenant-scoped data loading.
 
 Verification: unit/integration tests, `corepack pnpm typecheck`, `corepack pnpm lint`, `corepack pnpm db:check`, `corepack pnpm build`, `corepack pnpm db:test-clean`, and `corepack pnpm test:integration:phase4` pass. The current persisted Phase 4 suite passes 40 tests in an ephemeral database.
 
 ## Phase 5 and Phase 6 implementation status
 
-Phase 5 student, guardian, and enrollment workflows are implemented with tenant-scoped services, normalized identifiers, effective-dated enrollment transfers, PostgreSQL overlap protection, lifecycle audits, and persisted integration coverage. The student list, create route, and tenant-scoped student detail route are available.
+Phase 5 student, guardian, and enrollment workflows are implemented with tenant-scoped services, normalized identifiers, effective-dated enrollment transfers, PostgreSQL overlap protection, lifecycle audits, and persisted integration coverage. Guardian contact and relationship flags are edited through one profile form action. Non-active student profiles can be explicitly reactivated without reopening enrollment history. The student list, create route, and tenant-scoped student detail route are available.
 
 Phase 6 attendance now has a tenant/date-authorized persisted vertical slice: daily session uniqueness, effective-roster validation, status upsert, same-day teacher restriction, correction audits, server action, and transactional notification intent. Attendance reads school-local status policy, creates one pending outbox intent per eligible active SMS guardian, and snapshots recipient mobile, message, and policy decision. Same-status resubmission is idempotent by school, attendance record, guardian, and resulting status. SMS provider delivery, claiming, retries, logs, and delivery visibility remain Phase 8 work.
 
