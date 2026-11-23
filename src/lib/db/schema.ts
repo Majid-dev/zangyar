@@ -1,5 +1,6 @@
 import {
   boolean,
+  char,
   check,
   date,
   foreignKey,
@@ -27,6 +28,7 @@ export const schoolStatus = pgEnum("school_status", ["ACTIVE", "SUSPENDED", "ARC
 export const membershipRole = pgEnum("membership_role", ["SCHOOL_ADMIN", "TEACHER"]);
 export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED"]);
 export const academicYearStatus = pgEnum("academic_year_status", ["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]);
+export const teacherInvitationStatus = pgEnum("teacher_invitation_status", ["PENDING", "REVOKED", "CONSUMED"]);
 export const recordStatus = pgEnum("record_status", ["ACTIVE", "ARCHIVED"]);
 export const studentStatus = pgEnum("student_status", ["ACTIVE", "WITHDRAWN", "GRADUATED", "ARCHIVED"]);
 export const attendanceSessionKind = pgEnum("attendance_session_kind", ["DAILY", "LESSON"]);
@@ -37,12 +39,17 @@ export const notificationStatus = pgEnum("notification_status", ["PENDING", "PRO
 export const notificationAttemptStatus = pgEnum("notification_attempt_status", ["SENT", "FAILED", "RETRYABLE", "PERMANENT"]);
 
 // Better Auth owns these global identity/session tables. Business entities reference user.id.
+// `phoneNumber` is the login identity (canonical `09XXXXXXXXX`, see lib/mobile.ts);
+// `email` remains a required unique column because Better Auth identity rows and
+// the development bootstrap still provision one.
 export const users = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
+  phoneNumber: varchar("phone_number", { length: 20 }).unique(),
+  phoneNumberVerified: boolean("phone_number_verified").default(false).notNull(),
   ...timestamps,
 });
 
@@ -129,6 +136,66 @@ export const schoolSettings = pgTable("school_settings", {
   notifyOnExcused: boolean("notify_on_excused").default(false).notNull(),
   ...timestamps,
 });
+
+// A teacher's school-local employment record. The membership carries identity,
+// role, and access; this row carries the attributes that only mean something for
+// a teacher at one school, such as the personnel code. `schoolId` is stored
+// explicitly and tied to the membership through a composite foreign key, so a
+// profile can never describe a membership in another school.
+export const teacherProfiles = pgTable("teacher_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  membershipId: uuid("membership_id").notNull(),
+  personnelCode: varchar("personnel_code", { length: 50 }),
+  firstName: varchar("first_name", { length: 100 }).notNull(),
+  lastName: varchar("last_name", { length: 100 }).notNull(),
+  ...timestamps,
+}, (table) => [
+  foreignKey({
+    columns: [table.schoolId, table.membershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "teacher_profiles_school_membership_fk",
+  }).onDelete("restrict"),
+  unique("teacher_profiles_membership_unique").on(table.membershipId),
+  uniqueIndex("teacher_profiles_school_personnel_code_unique").on(table.schoolId, table.personnelCode).where(sql`personnel_code is not null`),
+  index("teacher_profiles_school_name_idx").on(table.schoolId, table.lastName, table.firstName),
+]);
+
+/**
+ * Teacher activation invitations.
+ *
+ * Invitation state is deliberately separate from membership state and from user
+ * identity state: a membership is ACTIVE/SUSPENDED/REVOKED and always means
+ * school access, while this row tracks whether the teacher has completed
+ * activation. `PENDING` past `expiresAt` is read as expired rather than stored,
+ * so no sweeper job is required. The plaintext token is never persisted: only
+ * its SHA-256 hash is stored, and it is single-use because activation consumes
+ * the row conditionally.
+ */
+export const teacherInvitations = pgTable("teacher_invitations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  membershipId: uuid("membership_id").notNull(),
+  tokenHash: char("token_hash", { length: 64 }).notNull(),
+  status: teacherInvitationStatus("status").default("PENDING").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+  revokedByUserId: text("revoked_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  ...timestamps,
+}, (table) => [
+  foreignKey({
+    columns: [table.schoolId, table.membershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "teacher_invitations_school_membership_fk",
+  }).onDelete("restrict"),
+  unique("teacher_invitations_token_hash_unique").on(table.tokenHash),
+  // At most one usable invitation per membership. Resending revokes the current
+  // pending row before inserting, so the slot is always freed first.
+  uniqueIndex("teacher_invitations_one_pending_per_membership_idx").on(table.schoolId, table.membershipId).where(sql`status = 'PENDING'`),
+  index("teacher_invitations_school_membership_idx").on(table.schoolId, table.membershipId, table.createdAt),
+]);
 
 export const academicYears = pgTable("academic_years", {
   id: uuid("id").defaultRandom().primaryKey(),

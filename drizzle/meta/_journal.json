@@ -29,6 +29,20 @@
       "when": 1794823920000,
       "tag": "0003_guardian_email",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795416726898,
+      "tag": "0004_user_mobile_login",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1796006400000,
+      "tag": "0005_teacher_provisioning",
+      "breakpoints": true
     }
   ]
 }

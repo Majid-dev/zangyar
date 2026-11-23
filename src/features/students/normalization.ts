@@ -1,18 +1,10 @@
-const persianDigits = "۰۱۲۳۴۵۶۷۸۹";
-const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
-
-export function toAsciiDigits(value: string) {
-  return [...value].map((character) => {
-    const persianIndex = persianDigits.indexOf(character);
-    if (persianIndex >= 0) return String(persianIndex);
-    const arabicIndex = arabicDigits.indexOf(character);
-    return arabicIndex >= 0 ? String(arabicIndex) : character;
-  }).join("");
-}
+import { toAsciiDigits } from "@/lib/digits";
 
 function cleanIdentifier(value: string) {
   return toAsciiDigits(value).trim().replace(/[\s-]/g, "");
 }
+
+export { toAsciiDigits };
 
 export function normalizeAdmissionNumber(value: string) {
   return cleanIdentifier(value);

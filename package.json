@@ -11,10 +11,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:check": "drizzle-kit check",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed:demo": "tsx --conditions=react-server scripts/seed-demo-tenant.ts",
     "db:test-clean": "node scripts/test-clean-migration.mjs",
+    "test:integration:auth": "node scripts/test-auth-integration.mjs",
     "test:integration:phase4": "node scripts/test-phase4-integration.mjs",
     "test:integration:phase5": "node scripts/test-phase5-integration.mjs",
-    "test:integration:phase6": "node scripts/test-phase6-integration.mjs"
+    "test:integration:phase6": "node scripts/test-phase6-integration.mjs",
+    "test:integration:teachers": "node scripts/test-teachers-integration.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.25",
@@ -40,6 +44,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^5.1.0"

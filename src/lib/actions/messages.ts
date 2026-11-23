@@ -51,6 +51,18 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "Transfer must start after the previous enrollment.": "شروع انتقال باید بعد از ثبت‌نام قبلی باشد.",
   "User not found.": "کاربر پیدا نشد.",
   "A School Admin cannot change their own membership status.": "مدیر مدرسه نمی‌تواند وضعیت عضویت خود را تغییر دهد.",
+  "A teacher with this mobile number already belongs to this school.": "دبیری با این شماره همراه از قبل در این مدرسه ثبت شده است.",
+  "An activated teacher cannot be invited again.": "این دبیر حساب خود را فعال کرده و نمی‌توان دوباره برای او دعوت فرستاد.",
+  "Personnel code is already in use at this school.": "این کد پرسنلی در این مدرسه قبلاً استفاده شده است.",
+  "School membership is not active.": "عضویت این کاربر در مدرسه فعال نیست.",
+  "The teacher name cannot be empty.": "نام دبیر نمی‌تواند خالی باشد.",
+  "There is no pending invitation for this teacher.": "دعوت در انتظاری برای این دبیر وجود ندارد.",
+  "This activation link is invalid or has expired.": "این پیوند فعال‌سازی معتبر نیست یا منقضی شده است.",
+  "This mobile number belongs to an account that cannot be activated.": "این شماره همراه به حسابی تعلق دارد که قابل فعال‌سازی نیست.",
+  "This mobile number belongs to an account with a different role at this school.": "این شماره همراه به حسابی با نقش دیگری در این مدرسه تعلق دارد.",
+  "This teacher account is already activated.": "حساب این دبیر قبلاً فعال شده است.",
+  "Teacher not found.": "دبیر پیدا نشد.",
+  "Teacher profile not found.": "پرونده‌ی دبیر پیدا نشد.",
   "Training or configuration data is invalid.": "اطلاعات واردشده معتبر نیست.",
 };
 

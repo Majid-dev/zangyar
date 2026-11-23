@@ -160,6 +160,26 @@ This file records product and architecture decisions for the initial MVP. Decisi
 
 **Rationale:** Native option popup styling is OS/browser-controlled and inconsistent. A shared control gives ZangYar consistent radius, spacing, focus, hover, and selection treatment without introducing unnecessary dependencies.
 
+## ADR-021: Separate teacher invitation state from membership and identity state
+
+**Status:** Accepted
+
+**Decision:** A teacher is provisioned by a School Admin, never by self-registration. Provisioning creates or reuses the global user identity by normalized mobile number, creates a `TEACHER` membership in the acting admin's school, and issues a one-time activation invitation. Invitation state (`PENDING`, `REVOKED`, `CONSUMED`, plus a derived `EXPIRED`) is stored on `teacher_invitations` and is deliberately **not** folded into `school_memberships.status`, which keeps meaning school access (`ACTIVE`/`SUSPENDED`/`REVOKED`). The account is created with a verified mobile number and **no credential account**, and activation is the only path that links one.
+
+**Rationale:** Membership state answers "may this person use the school?" and invitation state answers "has this person finished setting up?". Conflating them would make a person who never opened their invitation indistinguishable from one whose access was deliberately withdrawn, and it would force every existing authorization check to learn a new membership value. Keeping the credential absent until activation makes "cannot authenticate before activating" a property of the data rather than a condition someone has to remember to check.
+
+**Consequences:** Both enabled sign-in endpoints refuse an account with no credential, so a provisioned teacher provably cannot sign in until activation; this is asserted by test rather than assumed. The token is stored only as a SHA-256 hash, is single-use through a conditional consume-and-link transaction, and is never written to the audit trail. Resending revokes every previous pending invitation, and a partial unique index enforces at most one usable invitation per membership. Because no SMS or email provider exists yet, the activation link is shown to the admin to pass along; a delivery integration can later consume the same link without changing this model.
+
+## ADR-022: Model the teacher's school-local record separately from the membership
+
+**Status:** Accepted
+
+**Decision:** Teacher-specific attributes that only mean something within one school, currently the personnel code, live on a `teacher_profiles` row that is one-to-one with a school membership. The row carries an explicit `schoolId` constrained to the membership's school through a composite foreign key, and the profile's personnel code is unique within the school when present.
+
+**Rationale:** The membership already expresses identity, role, and access, so adding teacher-only columns to it would put fields that are meaningless for a School Admin on every membership row. A separate record keeps each table's meaning unambiguous while preserving the invariant that the profile describes exactly one membership in exactly one school.
+
+**Consequences:** Reads that show a teacher join the profile. Deactivation and reactivation continue to act on the membership, so the profile row is retained rather than deleted, consistent with the archive-over-delete rule. The database cannot express "this membership has the TEACHER role" through a foreign key, so that requirement stays enforced in the service layer, the same known gap already recorded for `class_teachers`.
+
 ## ADR-012: Preserve historical records through status and archive transitions
 
 **Status:** Accepted
@@ -169,3 +189,23 @@ This file records product and architecture decisions for the initial MVP. Decisi
 **Rationale:** Reports, audits, and notification history require stable references.
 
 **Decision:** Operational records use archive/status transitions instead of destructive deletion in the MVP. Detailed retention, export, privacy, and formal guardian-consent requirements remain deferred until before production launch.
+
+## ADR-019: Use the Iranian mobile number as the login identity
+
+**Status:** Accepted
+
+**Decision:** The login identity is the user's Iranian mobile number, not an email address. Better Auth's phone-number plugin supplies password-based sign-in and the `phoneNumber` / `phoneNumberVerified` user fields. `src/lib/mobile.ts` is the single canonicalization point: all accepted spellings normalize to `09XXXXXXXXX` before storage and before lookup. A phone number must be verified to sign in.
+
+**Rationale:** Schools know staff by mobile number, and mobile is the identifier SMS delivery already uses. One canonical format prevents the same person from existing twice because of how their number was typed.
+
+**Consequences:** `email` remains required and unique because Better Auth identity rows and account provisioning still provide one; it is not a login credential on the product surface. OTP endpoints are disabled because no SMS provider exists yet, so verification state is set by an authorized provisioning path rather than by self-service OTP.
+
+## ADR-020: Restrict the demo tenant bootstrap to development
+
+**Status:** Accepted
+
+**Decision:** The demo school and its School Admin account are created by a development-only operator tool, not by an application route, migration, or production code path. The environment gate runs before the first write and refuses production, any non-development `NODE_ENV`, and any non-local database. The seed is idempotent, never resets an existing password, and never overwrites a profile value an operator changed.
+
+**Rationale:** A bootstrap that writes a known account with a known password is valuable in development and unacceptable in production. A hard precondition, checked before any write, is auditable in a way a documented convention is not.
+
+**Consequences:** Demo credentials live only in development configuration and are never logged or exposed through an application route. Production tenant and account provisioning needs its own flow, which is deferred.

@@ -19,6 +19,8 @@ erDiagram
     SCHOOLS ||--o{ SCHOOL_MEMBERSHIPS : has
     USERS ||--o| PLATFORM_ADMINS : may_be
     SCHOOLS ||--|| SCHOOL_SETTINGS : configures
+    SCHOOL_MEMBERSHIPS ||--o| TEACHER_PROFILES : describes
+    SCHOOL_MEMBERSHIPS ||--o{ TEACHER_INVITATIONS : activates
 
     SCHOOLS ||--o{ ACADEMIC_YEARS : owns
     SCHOOLS ||--o{ GRADES : defines
@@ -56,11 +58,13 @@ erDiagram
 
 | Entity | Ownership | Cardinality and lifecycle |
 |---|---|---|
-| `users` | Global | One account can have many school memberships. Managed with the authentication system. |
+| `users` | Global | One account can have many school memberships. Managed with the authentication system. Login identity is the unique `phoneNumber` (canonical `09XXXXXXXXX`); `phoneNumberVerified` must be true for sign-in. `email` remains a required unique column because Better Auth identity rows still carry one. |
 | `platform_admins` | Platform | Explicit platform authorization for a user; may be revoked without changing school memberships. |
 | `schools` | Tenant root | Created, activated, suspended, and archived. Historical records remain linked. |
-| `school_memberships` | School | Exactly one membership per user/school; each membership has exactly one role, either School Admin or Teacher. Status may be active, suspended, or revoked. |
+| `school_memberships` | School | Exactly one membership per user/school; each membership has exactly one role, either School Admin or Teacher. Status may be active, suspended, or revoked, and always describes school access — invitation state is stored separately. |
 | `school_settings` | School | One-to-one configuration record; created with or shortly after a school. |
+| `teacher_profiles` | School | One-to-one with a School Membership. Holds teacher-only attributes that are meaningful within a single school, currently the personnel code; unique per school when present. Retained when a teacher is deactivated. |
+| `teacher_invitations` | School | Teacher activation invitations. Status is `PENDING`, `REVOKED`, or `CONSUMED`; expiry is derived from `expiresAt` rather than stored. At most one `PENDING` row per membership. The plaintext token is never stored, only its SHA-256 hash. |
 
 ### Academic management
 
@@ -100,6 +104,10 @@ erDiagram
 
 ## Recommended fields and constraints
 
+### `users`
+
+Global identity, managed with the authentication system. `phoneNumber` is the login identity and is unique across the platform; it is stored in the canonical Iranian mobile format `09XXXXXXXXX`. `phoneNumberVerified` must be true before the account can sign in. `email` stays required and unique because Better Auth identity rows and account provisioning still provide one. A user identity is never duplicated for joining another school — additional schools are added as additional memberships.
+
 ### `schools`
 
 Identity, name, slug/code, status, timezone (default `Asia/Tehran`), contact fields, and created/updated timestamps. `slug` should be globally unique.
@@ -107,6 +115,12 @@ Identity, name, slug/code, status, timezone (default `Asia/Tehran`), contact fie
 ### `school_memberships`
 
 `schoolId`, `userId`, role, status, created/suspended/revoked timestamps. Recommended unique constraint: `(schoolId, userId)`. The role is a single enum value and must be either `SCHOOL_ADMIN` or `TEACHER`; do not introduce a membership-role join table for the MVP. A Teacher assignment must reference a membership whose role is `TEACHER`.
+
+### `teacher_profiles` and `teacher_invitations`
+
+`teacher_profiles` is one-to-one with a school membership and carries `schoolId`, `membershipId`, `personnelCode`, `firstName`, and `lastName`. `(schoolId, membershipId)` is a composite foreign key into `school_memberships`, so a profile can never describe a membership in another school, and `membershipId` is unique. The personnel code is unique within a school when present, via a partial unique index on `(schoolId, personnelCode) WHERE personnelCode IS NOT NULL`; the same code may exist in another school. Deactivation suspends the membership and leaves the profile row in place.
+
+`teacher_invitations` records the activation lifecycle: `schoolId`, `membershipId`, `tokenHash`, `status`, `expiresAt`, `createdByUserId`, and the `consumedAt` / `revokedAt` / `revokedByUserId` marks. `tokenHash` is a SHA-256 digest of the plaintext token, which is never persisted. `(schoolId, membershipId)` is a composite foreign key into `school_memberships`, and a partial unique index on `(schoolId, membershipId) WHERE status = 'PENDING'` enforces at most one usable invitation per membership. A `PENDING` row past `expiresAt` is read as expired rather than transitioned, so no sweeper is required. Invitation state is separate from membership state and from the user identity: it answers whether activation was completed, not whether the person may access the school.
 
 ### `school_settings` notification policy
 
@@ -175,6 +189,8 @@ Include nullable school, actor user, optional actor membership, action, entity t
 | `schools` | Root ID | Tenant root. |
 | `school_memberships` | Yes | Unique school/user and user-to-school membership. |
 | `school_settings` | Yes | One-to-one school foreign key. |
+| `teacher_profiles` | Yes | Composite reference to the membership's own school; unique membership. |
+| `teacher_invitations` | Yes | Composite reference to the membership's own school; one pending per membership. |
 | `academic_years`, `grades`, `subjects` | Yes | School-scoped unique codes. |
 | `classrooms` | Yes | Composite references to school/year/grade. |
 | `class_teachers` | Yes | Same-school classroom/membership/subject references. |
@@ -205,6 +221,8 @@ Tenant-scoped indexes should normally begin with `schoolId`:
 ```text
 school_memberships(school_id, user_id)
 school_memberships(school_id, role, status)
+teacher_profiles(school_id, last_name, first_name) -- partial unique on (school_id, personnel_code) where not null
+teacher_invitations(school_id, membership_id, created_at) -- partial unique pending per membership
 academic_years(school_id, status)
 classrooms(school_id, academic_year_id, grade_id)
 class_teachers(school_id, teacher_membership_id)
@@ -244,6 +262,9 @@ audit_logs(actor_user_id, occurred_at)
 - Student lifecycle uses `ACTIVE`, `WITHDRAWN`, `GRADUATED`, and `ARCHIVED`; non-active profiles may be explicitly reactivated, which changes only global profile status and never reopens enrollments or assigns a classroom.
 - Guardian mobile and student national ID are normalized at the application boundary before school-scoped uniqueness checks.
 - Student-guardian relationship rows are retained; new links require a relationship type, and SMS eligibility requires a valid normalized mobile.
+- Teacher activation state is separate from membership state: a membership answers school access, an invitation answers whether activation was completed.
+- A provisioned teacher has no credential account until they complete activation, so no enabled sign-in path can authenticate them beforehand.
+- Invitation tokens are stored hashed and are single-use; resending invalidates every previous token for that membership.
 - PostgreSQL range exclusion enforces non-overlapping enrollment ranges; adjacent `[startDate, endDate)` transfers remain valid.
 
 ## Deferred design questions

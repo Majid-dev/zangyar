@@ -1,6 +1,6 @@
 import type { SchoolRole } from "@/lib/auth/authorization-core";
 
-export type NavIconName = "dashboard" | "students" | "classrooms" | "academics" | "attendance" | "activities" | "notifications";
+export type NavIconName = "dashboard" | "students" | "teachers" | "classrooms" | "academics" | "attendance" | "activities" | "notifications";
 
 export type NavItem = {
   href: string;
@@ -22,6 +22,7 @@ const SCHOOL_NAV_SECTIONS: readonly NavSection[] = [
     label: "مدیریت مدرسه",
     items: [
       { href: "/students", label: "دانش‌آموزان", icon: "students", roles: ["SCHOOL_ADMIN"] },
+      { href: "/teachers", label: "دبیران", icon: "teachers", roles: ["SCHOOL_ADMIN"] },
       { href: "/academics/classrooms", label: "کلاس‌ها", icon: "classrooms", roles: ["SCHOOL_ADMIN"] },
       { href: "/academics", label: "ساختار آموزشی", icon: "academics", roles: ["SCHOOL_ADMIN"] },
     ],

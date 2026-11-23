@@ -17,6 +17,8 @@ src/
 docs/            Product, architecture, data-model, roadmap, and decision records
 ```
 
+Login lives in the `(auth)` route group, which is public. Everything under `(app)` is authenticated and shares one layout: an unauthenticated visitor is redirected to `/login`, while an authenticated user without usable school context sees the matching access state.
+
 ### Presentation
 
 `src/app` owns route composition, layouts, loading/error states, and HTTP boundaries. React components should not contain direct database access or authorization decisions that are relied on for security.
@@ -113,9 +115,37 @@ Academic-year closure is one server-owned transaction: transition the year to `C
 
 Better Auth manages global identity and secure sessions. Application domain tables remain the source of truth for school membership and school business authorization.
 
-Initial school-level roles are `SCHOOL_ADMIN` and `TEACHER`. Each school membership has exactly one role; a member cannot hold both roles through one membership. Platform Admin authorization is a separate explicit assignment and must never be inferred from a school role.
+The login identity is the Iranian mobile number. The phone-number plugin supplies password-based sign-in and the `phoneNumber` / `phoneNumberVerified` user fields, and `src/lib/mobile.ts` is the single canonicalization point: every accepted spelling (`09…`, `+98…`, `0098…`, bare `9…`, Persian or Arabic digits) normalizes to `09XXXXXXXXX` before storage and before comparison, so input from one path always matches a lookup from another. A phone number must be verified to sign in. OTP delivery is not implemented because no SMS provider exists yet, so the OTP endpoints are disabled rather than left reachable in a non-functional state; verification state is set by an authorized provisioning path. Email/password remains enabled for existing accounts and tests, but the product login surface is mobile-only.
+
+Initial school-level roles are `SCHOOL_ADMIN` and `TEACHER`. Each school membership has exactly one role; a member cannot hold both roles through one membership. Platform Admin authorization is a separate explicit assignment and must never be inferred from a school role. Membership creation accepts only the school-level roles, so a School Admin cannot grant or create platform-level access.
 
 Parent authentication is outside MVP scope.
+
+The demo tenant bootstrap (`src/features/auth/bootstrap/`) is a development operator tool, not an application route. Its environment gate runs before any write and refuses production and non-local databases; it is idempotent, preserves existing credentials and profiles, and creates no platform administrator. See `docs/DEVELOPMENT.md`.
+
+### Teacher provisioning and activation
+
+A School Admin adds a teacher by name and mobile number (`src/features/teachers/`). Teachers never self-register into a school, and no provisioning input accepts a role: the created membership is always `TEACHER`.
+
+Provisioning creates or reuses the global user identity by normalized mobile number, creates the `TEACHER` membership in the acting admin's verified school, writes the teacher profile, and issues a one-time activation invitation. It does **not** set a password. The account is created with a verified mobile number and no credential account, and both enabled sign-in endpoints reject an account with no credential — so a provisioned teacher provably cannot authenticate until activation completes. That invariant is covered by test, not merely documented.
+
+Invitation state is stored separately from membership state: `teacher_invitations.status` is `PENDING`, `REVOKED`, or `CONSUMED`, with `EXPIRED` derived from `expiresAt` so no sweeper job is needed. Membership status continues to mean school access alone. The token is stored only as a SHA-256 hash, is single-use through a conditional consume-and-link in one transaction, and never appears in the audit trail. Resending revokes every previous pending invitation, and a partial unique index permits at most one usable invitation per membership. Because no SMS or email provider exists yet, the activation link is shown to the admin to pass along; `POST /activate/[token]` is the only public, token-authorized surface, and it derives the school, account, and role from the invitation row rather than from any client value.
+
+Teacher provisioning writes identity rows inside the same transaction as the domain rows, using a Better Auth instance bound to that transaction (`authOptions(tx, { transaction: false })` in `src/lib/auth/auth-options.ts`). Without that binding the adapter would check out a separate pooled connection and a rollback would leave an orphan identity holding the mobile number.
+
+Deactivation suspends the membership rather than deleting anything: every authorization check reads an active membership, so access ends immediately while the teacher record and history are retained. A suspended teacher keeps their credential and can still authenticate, but holds no active membership, so school authorization denies them — the intended end state.
+
+### Known authorization gaps
+
+These are recorded, not yet closed, and are outside the current slice:
+
+- `requirePlatformAdmin` has no callers yet; platform-level operations such as changing a school's status are currently gated as School Admin of that school.
+- School status is enforced on write and admin paths (`requireOperationalAdmin`, `requireStudentManagementAccess`) but not on every read path.
+- There is no last-admin protection: a School Admin can suspend or revoke every other admin of their school.
+- Re-inviting a previously revoked member has no dedicated path and currently surfaces as a uniqueness conflict. (Teacher provisioning now restores a suspended or revoked membership instead, and issues a fresh invitation; the gap remains for non-teacher memberships.)
+- `class_teachers.teacher_membership_id` enforces same-school membership at the database level, but the teacher-role requirement is enforced in the service layer only. The same applies to `teacher_profiles.membership_id`: a foreign key cannot express "this membership has the TEACHER role".
+- `/sign-up/email` remains enabled because several existing integration suites depend on it. It creates a user with no membership, which `getSchoolContext` refuses as `NO_SCHOOL`, so it is not a tenant bypass — but it is an unauthenticated account-creation surface and should be reviewed before production.
+
 
 ## Audit architecture
 
@@ -147,8 +177,16 @@ The initial Phase 3 authorization boundary is now in place in `src/lib/auth/auth
 - Ambiguous membership context, missing membership, unauthenticated access, wrong role, and missing Platform Admin access are rejected.
 - Membership mutations use Zod validation, tenant-scoped updates, transactions, and audit events in `src/features/memberships/services.ts`.
 - Pure active-school selection tests cover missing, ambiguous, matching, and cross-tenant selectors.
+- Login identity is the normalized Iranian mobile number, and the public `(auth)/login` route is the only product credential surface.
+- Persisted coverage runs through `corepack pnpm test:integration:auth` in an ephemeral migrated database: mobile login success and failure, OTP endpoint closure, demo seed idempotency and password preservation, and tenant/role isolation.
 
-Remaining Phase 3 work: complete persisted authorization verification and continue domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions.
+Remaining Phase 3 work: continue domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions; close the known authorization gaps listed above.
+
+### Teacher provisioning slice
+
+Teacher invitation and account provisioning is complete: School Admin teacher management (list with name and mobile search and filters by membership status and invitation status, add, edit, view), the invitation lifecycle (issue, resend invalidating previous tokens, revoke, expiry), activation through a public one-time link, and deactivation and reactivation via membership status. Persisted coverage runs through `corepack pnpm test:integration:teachers` in an ephemeral migrated database and includes a transaction-atomicity case proving a rolled-back provisioning leaves no orphan identity.
+
+Known limits in this slice: the activation link is delivered by the admin because no SMS or email provider exists; there is no last-admin protection; and the teacher-role requirement on a profile's membership is enforced in the service layer only.
 
 ## Phase 4 implementation status
 

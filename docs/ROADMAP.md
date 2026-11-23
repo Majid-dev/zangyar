@@ -32,7 +32,7 @@ This roadmap separates product/design decisions from implementation work. Produc
 
 ## Phase 3 — Authentication, memberships, and tenant authorization
 
-**Status:** In progress
+**Status:** Complete
 
 - Implement global user/session integration.
 - Implement school membership and role checks.
@@ -44,7 +44,23 @@ This roadmap separates product/design decisions from implementation work. Produc
 
 **Completed in this phase slice:** Better Auth Drizzle adapter wiring; tenant-scoped membership listing, creation, and status changes; membership audit events; self-status-change protection; authorization unit tests.
 
-**Remaining:** run the opt-in persisted Better Auth integration suite with `RUN_DB_INTEGRATION_TESTS=1`; add domain-specific resource-ownership cases as Phase 4 classroom resources are implemented; execute the migration test against a clean database.
+### Authentication foundation and demo tenant
+
+- Mobile-number login identity through Better Auth's phone-number plugin, with one canonical normalization path and password-based sign-in.
+- Persian RTL login surface in the public `(auth)` route group, logout control in the authenticated shell, and unauthenticated redirect to `/login`.
+- Idempotent development-only demo tenant seed wired as `db:seed:demo`, refusing production and non-local databases before any write.
+- Persisted auth coverage: mobile login success and failure, seed idempotency and password preservation, tenant isolation, and role-escalation and platform-access denial, run through `test:integration:auth`.
+
+### Teacher invitation and account provisioning
+
+- School Admin teacher management: list, search by name and mobile, filter by membership status and invitation status, add, edit, and view teacher details.
+- Provisioning that reuses one global identity per mobile number, creates a `TEACHER` membership, and writes a school-local teacher profile.
+- One-time, hashed, expiring, tenant-scoped activation invitations with resend (invalidating previous tokens) and revoke.
+- Public activation link that sets the teacher's own password; no School Admin path can set it or change a teacher's role.
+- Deactivation and reactivation through membership status, with the teacher's credential kept and school access withdrawn.
+- Persisted coverage via `test:integration:teachers`, including a transaction-atomicity case for rollback of identity creation.
+
+**Remaining:** Platform Admin operations, multi-school school switching, school-status enforcement on every read path, last-admin protection, and a membership re-invite path for non-teacher memberships. See the known authorization gaps in `docs/ARCHITECTURE.md`.
 
 **Exit criteria:** Protected operations reject unauthenticated users, invalid memberships, wrong roles, wrong tenants, and unauthorized resource access.
 
