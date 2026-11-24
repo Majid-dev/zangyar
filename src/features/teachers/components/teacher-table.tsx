@@ -1,0 +1,285 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useTransition } from "react";
+
+import { Badge } from "@/components/ui/badge";
+import { Input, Select } from "@/components/ui/field";
+import { Panel } from "@/components/ui/panel";
+import { formatPersianDateShort } from "@/lib/date";
+
+import type { TeacherListRow } from "../queries";
+import { TEACHER_DISPLAY_STATUS_LABELS, TEACHER_DISPLAY_STATUS_TONES } from "../status";
+import { TeacherRowActions } from "./teacher-row-actions";
+
+type SortField = "name" | "mobile" | "status" | "verification" | "personnel";
+type Direction = "asc" | "desc";
+
+/**
+ * Digits render in Persian and group as `0912 345 6789`, while the value stays
+ * `dir="ltr"` so the number reads left-to-right the way a phone number does.
+ */
+function formatMobileForDisplay(mobile: string | null) {
+  if (!mobile) return null;
+  const groups = [mobile.slice(0, 4), mobile.slice(4, 7), mobile.slice(7)].filter((part) => part.length > 0);
+  return groups.map((part) => toPersianDigits(part)).join(" ");
+}
+
+function toPersianDigits(value: string) {
+  return value.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+}
+
+const VERIFICATION_LABELS: Record<string, string> = {
+  true: "تأییدشده",
+  false: "تأییدنشده",
+  none: "—",
+};
+
+const VERIFICATION_TONES: Record<string, "success" | "warning" | "neutral"> = {
+  true: "success",
+  false: "warning",
+  none: "neutral",
+};
+
+type TeacherTableProps = {
+  rows: TeacherListRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  name?: string;
+  mobile?: string;
+  personnelCode?: string;
+  status?: string;
+  sort?: SortField;
+  dir?: Direction;
+};
+
+/**
+ * Teachers data table.
+ *
+ * A row is anchored on the authorized mobile number, so it exists before the
+ * person registers; the name and status fill in once they do. Each column owns the
+ * filter for the field it shows, and every control writes to the URL, so filtering
+ * is a soft navigation, is shareable, and always returns to the first page.
+ */
+export function TeacherTable({
+  rows,
+  total,
+  page,
+  pageSize,
+  name = "",
+  mobile = "",
+  personnelCode = "",
+  status,
+  sort = "name",
+  dir = "asc",
+}: TeacherTableProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const currentParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  function updateParams(changes: Record<string, string | null>) {
+    const params = new URLSearchParams(currentParams.toString());
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    params.delete("page");
+    startTransition(() => router.replace(`${pathname}${params.size ? `?${params.toString()}` : ""}`, { scroll: false }));
+  }
+
+  function sortBy(field: SortField) {
+    updateParams({ sort: field, dir: sort === field && dir === "asc" ? "desc" : "asc" });
+  }
+
+  const previous = new URLSearchParams(currentParams.toString());
+  previous.set("page", String(Math.max(1, page - 1)));
+  const next = new URLSearchParams(currentParams.toString());
+  next.set("page", String(Math.min(pageCount, page + 1)));
+
+  return (
+    <Panel className="overflow-hidden p-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4 sm:p-5">
+        <div className="flex items-center gap-3">
+          <p className="text-sm font-black text-primary">فهرست دبیران</p>
+          {isPending ? <span className="text-xs font-bold text-secondary" role="status">در حال به‌روزرسانی…</span> : null}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted" aria-live="polite">{total} دبیر</span>
+          <Link href="/teachers/new" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-primary px-3 text-xs font-bold text-white transition hover:bg-primary/90">افزودن شماره همراه</Link>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[880px] text-start text-sm" dir="rtl">
+          <caption className="sr-only">فهرست شماره‌های همراه ثبت‌شده، وضعیت ثبت‌نام و تأیید شماره</caption>
+          <thead className="bg-sage/50 text-xs text-muted">
+            <tr>
+              <HeaderCell label="دبیر" sortField="name" sort={sort} dir={dir} onSort={sortBy}>
+                <TextFilter label="نام دبیر" placeholder="نام یا نام خانوادگی" value={name} onSubmit={(value) => updateParams({ name: value || null })} />
+              </HeaderCell>
+              <HeaderCell label="شماره همراه" sortField="mobile" sort={sort} dir={dir} onSort={sortBy} align="end">
+                <TextFilter label="شماره همراه" placeholder="۰۹…" value={mobile} onSubmit={(value) => updateParams({ mobile: value || null })} dir="ltr" />
+              </HeaderCell>
+              <HeaderCell label="کد پرسنلی" sortField="personnel" sort={sort} dir={dir} onSort={sortBy} align="end">
+                <TextFilter label="کد پرسنلی" placeholder="کد" value={personnelCode} onSubmit={(value) => updateParams({ personnelCode: value || null })} dir="ltr" />
+              </HeaderCell>
+              <HeaderCell label="وضعیت" sortField="status" sort={sort} dir={dir} onSort={sortBy}>
+                <Select aria-label="فیلتر وضعیت" value={status ?? ""} onChange={(event) => updateParams({ status: event.target.value || null })} className="min-h-8 px-2 text-xs">
+                  <option value="">همه وضعیت‌ها</option>
+                  <option value="PENDING_REGISTRATION">در انتظار ثبت‌نام</option>
+                  <option value="PENDING_ADMIN_APPROVAL">در انتظار تأیید مدیر</option>
+                  <option value="ACTIVE">فعال</option>
+                  <option value="REJECTED">رد‌شده</option>
+                  <option value="DEACTIVATED">غیرفعال</option>
+                </Select>
+              </HeaderCell>
+              <HeaderCell label="تأیید شماره همراه" sortField="verification" sort={sort} dir={dir} onSort={sortBy} hideSort />
+              <th scope="col" className="px-5 py-3 text-end align-top font-bold">عملیات</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((teacher) => {
+              const verification = teacher.mobileVerified === null ? "none" : teacher.mobileVerified ? "true" : "false";
+              return (
+                <tr key={teacher.registrationId} className="hover:bg-sage/25">
+                  <td className="px-4 py-4 text-start">
+                    {teacher.firstName && teacher.lastName ? (
+                      <Link href={`/teachers/${teacher.registrationId}`} className="font-bold text-primary hover:text-secondary">
+                        {teacher.firstName} {teacher.lastName}
+                      </Link>
+                    ) : (
+                      // Before registration there is no name: the school authorized a
+                      // number, and the person has not identified themselves yet.
+                      <Link href={`/teachers/${teacher.registrationId}`} className="text-xs text-muted hover:text-primary">در انتظار ثبت‌نام</Link>
+                    )}
+                  </td>
+                  <td className="px-4 py-4 text-end text-xs">
+                    <span dir="ltr" className="inline-block font-bold tabular-nums text-primary">{formatMobileForDisplay(teacher.phoneNumber)}</span>
+                  </td>
+                  <td className="px-4 py-4 text-end text-xs text-muted">{teacher.personnelCode ?? "—"}</td>
+                  <td className="px-4 py-4 text-start">
+                    <Badge tone={TEACHER_DISPLAY_STATUS_TONES[teacher.displayStatus]}>{TEACHER_DISPLAY_STATUS_LABELS[teacher.displayStatus]}</Badge>
+                    {teacher.registeredAt ? <span className="mt-1 block text-[11px] text-muted/80">ثبت‌نام {formatPersianDateShort(toIsoDate(teacher.registeredAt))}</span> : null}
+                  </td>
+                  <td className="px-4 py-4 text-start">
+                    <Badge tone={VERIFICATION_TONES[verification]}>{VERIFICATION_LABELS[verification]}</Badge>
+                  </td>
+                  <td className="px-5 py-4">
+                    <TeacherRowActions
+                      registrationId={teacher.registrationId}
+                      statusAction={teacher.statusAction}
+                      rejectionAction={teacher.rejectionAction}
+                      canEditMobile={teacher.canEditMobile}
+                      canDeleteRegistration={teacher.canDeleteRegistration}
+                      compact
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 ? <tr><td colSpan={6} className="p-10 text-center text-sm text-muted">دبیری با این فیلتر پیدا نشد.</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-xs text-muted">
+        <span>نمایش {rows.length} از {total} دبیر</span>
+        {pageCount > 1 ? (
+          <div className="flex gap-1">
+            <Link href={`?${previous}`} className="flex size-8 items-center justify-center rounded-lg bg-sage font-bold text-primary" aria-label="صفحه قبل">›</Link>
+            <span className="flex size-8 items-center justify-center rounded-lg bg-primary font-bold text-white" aria-current="page">{page}</span>
+            <Link href={`?${next}`} className="flex size-8 items-center justify-center rounded-lg hover:bg-sage" aria-label="صفحه بعد">‹</Link>
+          </div>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
+function toIsoDate(value: Date | string) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function HeaderCell({ label, sortField, sort, dir, onSort, children, hideSort = false, align = "start" }: { label: string; sortField: SortField; sort: SortField; dir: Direction; onSort: (field: SortField) => void; children?: React.ReactNode; hideSort?: boolean; align?: "start" | "end" }) {
+  const active = sort === sortField;
+  return (
+    <th scope="col" className={`px-4 py-3 align-top font-bold first:ps-5 ${align === "end" ? "text-end" : "text-start"}`}>
+      {hideSort ? (
+        <span>{label}</span>
+      ) : (
+        <button type="button" onClick={() => onSort(sortField)} aria-label={`مرتب‌سازی بر اساس ${label}`} className={`inline-flex items-center gap-1 font-bold transition ${active ? "text-primary" : "text-muted hover:text-primary"}`}>
+          <span>{label}</span>
+          <span aria-hidden="true" className={active ? "" : "opacity-30"}>{active && dir === "desc" ? "↓" : "↑"}</span>
+        </button>
+      )}
+      {children ? <div className="mt-2 grid gap-1.5 font-normal">{children}</div> : null}
+    </th>
+  );
+}
+
+/**
+ * Debounced column search.
+ *
+ * Uncontrolled on purpose: a controlled input would need an effect to follow
+ * external changes from back/forward navigation, and a remount would drop focus
+ * mid-typing. The DOM node stays the source of truth.
+ */
+function TextFilter({ label, placeholder, value, onSubmit, dir }: { label: string; placeholder: string; value: string; onSubmit: (value: string) => void; dir?: "ltr" | "rtl" }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const submitRef = useRef(onSubmit);
+  const inputId = `teacher-filter-${label}`;
+
+  useEffect(() => {
+    submitRef.current = onSubmit;
+  }, [onSubmit]);
+
+  useEffect(() => {
+    const input = formRef.current?.elements.namedItem(inputId);
+    if (input instanceof HTMLInputElement && input.value !== value) input.value = value;
+  }, [value, inputId]);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    let timer: number | undefined;
+    const read = () => {
+      const input = form.elements.namedItem(inputId);
+      return input instanceof HTMLInputElement ? input.value.trim() : "";
+    };
+    const handleInput = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => submitRef.current(read()), 350);
+    };
+    form.addEventListener("input", handleInput);
+    function handleSubmit(event: SubmitEvent) {
+      event.preventDefault();
+      window.clearTimeout(timer);
+      submitRef.current(read());
+    }
+    form.addEventListener("submit", handleSubmit);
+    return () => {
+      window.clearTimeout(timer);
+      form.removeEventListener("input", handleInput);
+      form.removeEventListener("submit", handleSubmit);
+    };
+  }, [inputId]);
+
+  return (
+    <form ref={formRef} onSubmit={(event) => event.preventDefault()}>
+      <label className="sr-only" htmlFor={inputId}>{`فیلتر ${label}`}</label>
+      <Input
+        id={inputId}
+        name={inputId}
+        defaultValue={value}
+        placeholder={placeholder}
+        dir={dir}
+        className={`min-h-8 px-2 text-xs ${dir === "ltr" ? "text-start" : ""}`}
+      />
+    </form>
+  );
+}

@@ -51,6 +51,37 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "Transfer must start after the previous enrollment.": "شروع انتقال باید بعد از ثبت‌نام قبلی باشد.",
   "User not found.": "کاربر پیدا نشد.",
   "A School Admin cannot change their own membership status.": "مدیر مدرسه نمی‌تواند وضعیت عضویت خود را تغییر دهد.",
+  "A teacher with this mobile number already belongs to this school.": "دبیری با این شماره همراه از قبل در این مدرسه ثبت شده است.",
+  "An activated teacher's mobile number cannot be changed.": "شماره همراه دبیری که حسابش فعال شده قابل تغییر نیست.",
+  "This is already the teacher's mobile number.": "این همان شماره همراه فعلی دبیر است.",
+  "This mobile number already belongs to another account.": "این شماره همراه از قبل به حساب دیگری تعلق دارد.",
+  "The teacher's mobile number could not be updated.": "تغییر شماره همراه دبیر انجام نشد.",
+  "A code was sent recently. Try again in": "کد تأیید به‌تازگی ارسال شده است. کمی بعد دوباره تلاش کنید.",
+  "No OTP provider is configured, so codes cannot be issued.": "سامانه‌ی ارسال کد تأیید در دسترس نیست.",
+  "OTP_PROVIDER=development is refused in production: it issues a fixed, publicly known code.": "این تنظیم در محیط عملیاتی مجاز نیست.",
+  "OTP_PROVIDER=sms is reserved but no SMS provider is implemented yet.": "ارسال پیامک هنوز راه‌اندازی نشده است.",
+  "The mobile number is not a valid Iranian mobile number.": "شماره همراه واردشده معتبر نیست.",
+  "The verification code could not be sent.": "ارسال کد تأیید انجام نشد. لطفاً دوباره تلاش کنید.",
+  "The verification code is invalid or has expired.": "کد تأیید نامعتبر است یا منقضی شده است.",
+  "This code is invalid or has expired.": "کد تأیید نامعتبر است یا منقضی شده است.",
+  "Too many codes were requested for this number. Try again later.": "تعداد درخواست کد برای این شماره زیاد بوده است. کمی بعد دوباره تلاش کنید.",
+  "An activated teacher cannot be invited again.": "این دبیر حساب خود را فعال کرده و نمی‌توان دوباره برای او دعوت فرستاد.",
+  "Personnel code is already in use at this school.": "این کد پرسنلی در این مدرسه قبلاً استفاده شده است.",
+  "School membership is not active.": "عضویت این کاربر در مدرسه فعال نیست.",
+  // Teacher registration
+  "A registered teacher cannot be deleted here. Deactivate them instead.": "دبیری که ثبت‌نام کرده را نمی‌توان حذف کرد؛ به‌جای آن دسترسی او را غیرفعال کنید.",
+  "A registered teacher's mobile number cannot be changed here.": "شماره همراه دبیری که ثبت‌نام کرده از این‌جا قابل تغییر نیست.",
+  "No school has authorized this mobile number.": "هیچ مدرسه‌ای این شماره همراه را مجاز نکرده است.",
+  "Registration could not be completed.": "تکمیل ثبت‌نام انجام نشد.",
+  "This mobile number is already registered at this school.": "این شماره همراه قبلاً برای این مدرسه ثبت شده است.",
+  "This person already belongs to this school.": "این شخص از قبل عضو این مدرسه است.",
+  "This registration can no longer be changed.": "این ثبت دیگر قابل تغییر نیست؛ می‌توانید آن را حذف کنید.",
+  "This registration changed while it was being deleted.": "وضعیت این ثبت همزمان تغییر کرد و حذف انجام نشد. صفحه را دوباره بارگذاری کنید.",
+  "This teacher has not registered yet.": "این دبیر هنوز ثبت‌نام نکرده است.",
+  "Teacher status changed concurrently. Reload the page and try again.": "وضعیت این دبیر همزمان تغییر کرده است. صفحه را دوباره بارگذاری کنید.",
+  "This is already the registered mobile number.": "این همان شماره همراه ثبت‌شده است.",
+  "Teacher registration not found.": "ثبت‌نام دبیر پیدا نشد.",
+  "Teacher profile not found.": "پرونده‌ی دبیر پیدا نشد.",
   "Training or configuration data is invalid.": "اطلاعات واردشده معتبر نیست.",
 };
 
@@ -59,6 +90,17 @@ const TRUNCATION = 300;
 function transitionMessage(raw: string) {
   if (raw.startsWith("Invalid academic year transition")) return "این تغییر وضعیت برای سال تحصیلی مجاز نیست.";
   if (raw.startsWith("Invalid school status transition")) return "این تغییر وضعیت برای مدرسه مجاز نیست.";
+  if (raw.startsWith("Invalid teacher status transition")) return "این تغییر وضعیت برای دبیر مجاز نیست. صفحه را دوباره بارگذاری کنید.";
+  return null;
+}
+
+/**
+ * OTP refusals that carry a retry hint, so the operator learns how long to wait.
+ * These embed a computed number, so they are matched by prefix rather than exactly.
+ */
+function otpThrottleMessage(raw: string) {
+  if (raw.startsWith("A code was sent recently.")) return "کد تأیید به‌تازگی ارسال شده است. کمی بعد دوباره تلاش کنید.";
+  if (raw.startsWith("Too many codes were requested")) return "تعداد درخواست کد برای این شماره زیاد بوده است. کمی بعد دوباره تلاش کنید.";
   return null;
 }
 
@@ -74,6 +116,9 @@ export function toUserMessage(error: unknown): { message: string; known: boolean
 
   const transition = transitionMessage(error.message);
   if (transition) return { message: transition, known: true };
+
+  const throttle = otpThrottleMessage(error.message);
+  if (throttle) return { message: throttle, known: true };
 
   return { message: "انجام این عملیات ممکن نشد. لطفاً دوباره تلاش کنید.", known: false };
 }

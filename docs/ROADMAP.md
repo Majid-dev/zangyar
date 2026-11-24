@@ -32,7 +32,7 @@ This roadmap separates product/design decisions from implementation work. Produc
 
 ## Phase 3 — Authentication, memberships, and tenant authorization
 
-**Status:** In progress
+**Status:** Complete
 
 - Implement global user/session integration.
 - Implement school membership and role checks.
@@ -44,7 +44,31 @@ This roadmap separates product/design decisions from implementation work. Produc
 
 **Completed in this phase slice:** Better Auth Drizzle adapter wiring; tenant-scoped membership listing, creation, and status changes; membership audit events; self-status-change protection; authorization unit tests.
 
-**Remaining:** run the opt-in persisted Better Auth integration suite with `RUN_DB_INTEGRATION_TESTS=1`; add domain-specific resource-ownership cases as Phase 4 classroom resources are implemented; execute the migration test against a clean database.
+### Authentication foundation and demo tenant
+
+- Mobile-number login identity through Better Auth's phone-number plugin, with one canonical normalization path and password-based sign-in.
+- Persian RTL login surface in the public `(auth)` route group, logout control in the authenticated shell, and unauthenticated redirect to `/login`.
+- Idempotent development-only demo tenant seed wired as `db:seed:demo`, refusing production and non-local databases before any write.
+- Persisted auth coverage: mobile login success and failure, seed idempotency and password preservation, tenant isolation, and role-escalation and platform-access denial, run through `test:integration:auth`.
+
+### Teacher registration and approval
+
+- School Admin authorizes a mobile number only: list searched by name, mobile, and personnel code, filtered by derived status, with the number correctable or deletable while unclaimed.
+- Public registration at `/register`: number, OTP verification, then the teacher supplies their own name, optional personnel code, and password.
+- Approval gate on membership status: a registered teacher is `PENDING_ADMIN_APPROVAL` and reaches no school resource until approved. Approval, rejection, deactivation, and reactivation are one guarded transition — approving a pending teacher *is* activating them — available from the teachers table as well as the teacher's page, with the actions derived from a single transition matrix.
+- Deleting an unclaimed authorization removes the row outright and leaves nothing behind; a claimed one is retained and ends through deactivation.
+- One global identity per mobile number, with a `TEACHER` membership and a school-local profile per authorizing school.
+- Persisted coverage via `test:integration:teachers`, including transaction atomicity for identity creation, a proof that a registration cannot reference another school's membership, and a proof that deleting an authorization orphans nothing and stays on the audit trail.
+
+### OTP verification infrastructure
+
+- Provider-independent OTP service: `OtpProvider` interface, configuration-selected implementation, and a Development-only fixed-code provider.
+- Purpose-specific challenges (`TEACHER_REGISTRATION`, `LOGIN`, `PASSWORD_RESET`) with keyed-hashed storage, expiry, attempt ceilings, resend cooldown, and per-number rate limiting.
+- Production gate: the fixed-code provider is refused at startup, with no override; a missing provider fails closed at request time.
+- Teacher registration requires a valid code before any identity is created; OTP login and password reset are wired end to end.
+- Persisted coverage via `test:integration:otp`.
+
+**Remaining:** a real SMS provider (the `sms` provider name is reserved and currently refused), expired-challenge cleanup, and Platform Admin operations. See the known authorization gaps in `docs/ARCHITECTURE.md`.
 
 **Exit criteria:** Protected operations reject unauthenticated users, invalid memberships, wrong roles, wrong tenants, and unauthorized resource access.
 

@@ -1,5 +1,6 @@
 import {
   boolean,
+  char,
   check,
   date,
   foreignKey,
@@ -25,8 +26,19 @@ const timestamps = {
 
 export const schoolStatus = pgEnum("school_status", ["ACTIVE", "SUSPENDED", "ARCHIVED"]);
 export const membershipRole = pgEnum("membership_role", ["SCHOOL_ADMIN", "TEACHER"]);
-export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED"]);
+// A teacher's access is granted only once a School Admin approves them, so the
+// approval decision lives on the membership. Every authorization path already
+// filters `status = 'ACTIVE'`, which means a pending or rejected teacher is
+// denied automatically with no change to any check. `PENDING_ADMIN_APPROVAL` and
+// `REJECTED` were added by a later migration.
+export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED", "PENDING_ADMIN_APPROVAL", "REJECTED"]);
 export const academicYearStatus = pgEnum("academic_year_status", ["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]);
+export const teacherRegistrationStatus = pgEnum("teacher_registration_status", ["PENDING", "CLAIMED", "REVOKED"]);
+// `TEACHER_REGISTRATION` replaced `TEACHER_ACTIVATION` when invitations were
+// removed. The legacy value remains in the database type but is no longer
+// accepted by the application.
+export const otpPurpose = pgEnum("otp_purpose", ["TEACHER_ACTIVATION", "TEACHER_REGISTRATION", "LOGIN", "PASSWORD_RESET"]);
+export const otpChallengeStatus = pgEnum("otp_challenge_status", ["PENDING", "CONSUMED", "REVOKED", "EXHAUSTED"]);
 export const recordStatus = pgEnum("record_status", ["ACTIVE", "ARCHIVED"]);
 export const studentStatus = pgEnum("student_status", ["ACTIVE", "WITHDRAWN", "GRADUATED", "ARCHIVED"]);
 export const attendanceSessionKind = pgEnum("attendance_session_kind", ["DAILY", "LESSON"]);
@@ -37,12 +49,17 @@ export const notificationStatus = pgEnum("notification_status", ["PENDING", "PRO
 export const notificationAttemptStatus = pgEnum("notification_attempt_status", ["SENT", "FAILED", "RETRYABLE", "PERMANENT"]);
 
 // Better Auth owns these global identity/session tables. Business entities reference user.id.
+// `phoneNumber` is the login identity (canonical `09XXXXXXXXX`, see lib/mobile.ts);
+// `email` remains a required unique column because Better Auth identity rows and
+// the development bootstrap still provision one.
 export const users = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
+  phoneNumber: varchar("phone_number", { length: 20 }).unique(),
+  phoneNumberVerified: boolean("phone_number_verified").default(false).notNull(),
   ...timestamps,
 });
 
@@ -129,6 +146,125 @@ export const schoolSettings = pgTable("school_settings", {
   notifyOnExcused: boolean("notify_on_excused").default(false).notNull(),
   ...timestamps,
 });
+
+// A teacher's school-local employment record. The membership carries identity,
+// role, and access; this row carries the attributes that only mean something for
+// a teacher at one school, such as the personnel code. `schoolId` is stored
+// explicitly and tied to the membership through a composite foreign key, so a
+// profile can never describe a membership in another school.
+export const teacherProfiles = pgTable("teacher_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  membershipId: uuid("membership_id").notNull(),
+  personnelCode: varchar("personnel_code", { length: 50 }),
+  firstName: varchar("first_name", { length: 100 }).notNull(),
+  lastName: varchar("last_name", { length: 100 }).notNull(),
+  ...timestamps,
+}, (table) => [
+  foreignKey({
+    columns: [table.schoolId, table.membershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "teacher_profiles_school_membership_fk",
+  }).onDelete("restrict"),
+  unique("teacher_profiles_membership_unique").on(table.membershipId),
+  uniqueIndex("teacher_profiles_school_personnel_code_unique").on(table.schoolId, table.personnelCode).where(sql`personnel_code is not null`),
+  index("teacher_profiles_school_name_idx").on(table.schoolId, table.lastName, table.firstName),
+]);
+
+/**
+ * A mobile number a School Admin has authorized to join the school.
+ *
+ * This is deliberately separate from both identity and membership, because a
+ * membership requires a `userId` and no account exists until the person
+ * registers. The admin's only assertion is "this number may join us"; the person
+ * supplies their own name, personnel code, and password later, from the public
+ * registration page.
+ *
+ * The row is durable rather than consumed: it is the record of who authorized
+ * which number, it keeps an unclaimed number visible to the admin, and it carries
+ * the resulting membership once registration completes. A number may be
+ * authorized once per school; deleting an unclaimed row and re-adding is allowed.
+ *
+ * It carries no personnel code: that is a teacher-school attribute and belongs on
+ * the profile the teacher's own registration creates (ADR-022, ADR-028).
+ */
+export const teacherRegistrations = pgTable("teacher_registrations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  // Canonical `09XXXXXXXXX`, the same normalization the login identity uses.
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  status: teacherRegistrationStatus("status").default("PENDING").notNull(),
+  // Set when the person completes registration; null while only authorized.
+  membershipId: uuid("membership_id"),
+  claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  ...timestamps,
+}, (table) => [
+  // One live authorization per number per school. A removed number frees the slot
+  // so it can be re-authorized, which is why REVOKED is excluded rather than
+  // treated as a plain uniqueness conflict.
+  uniqueIndex("teacher_registrations_school_phone_unique").on(table.schoolId, table.phoneNumber).where(sql`status <> 'REVOKED'`),
+  // Tolerates a null membership while only authorized, and once set guarantees the
+  // membership belongs to this same school.
+  foreignKey({
+    columns: [table.schoolId, table.membershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "teacher_registrations_school_membership_fk",
+  }).onDelete("restrict"),
+  index("teacher_registrations_school_status_idx").on(table.schoolId, table.status),
+  // Public registration looks a number up across all schools, so this is not
+  // school-prefixed on purpose.
+  index("teacher_registrations_phone_idx").on(table.phoneNumber),
+]);
+
+/**
+ * One-time OTP challenges.
+ *
+ * Deliberately separate from Better Auth's `verification` table (which the
+ * phone-number plugin owns and fills with plaintext `code:attempts` values):
+ * that table has no purpose, no attempt ceiling, no resend cooldown, and no way
+ * to associate a challenge with a school membership. A challenge here is keyed
+ * by purpose as well as number, so a code issued for one purpose cannot satisfy
+ * another.
+ *
+ * Only a keyed hash of the code is stored — never the code itself. A six-digit
+ * code has 10^6 possible values, so a bare hash would be brute-forced offline in
+ * milliseconds if a row leaked; the hash is HMAC-peppered with a server secret
+ * for that reason.
+ */
+export const otpChallenges = pgTable("otp_challenges", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  purpose: otpPurpose("purpose").notNull(),
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  codeHash: char("code_hash", { length: 64 }).notNull(),
+  status: otpChallengeStatus("status").default("PENDING").notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  maxAttempts: integer("max_attempts").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+  // Which provider delivered the code, for later attempt analysis. The provider's
+  // own settings never reach the database.
+  provider: varchar("provider", { length: 64 }).notNull(),
+  // Present only for purposes tied to a tenant, such as teacher activation.
+  schoolId: uuid("school_id"),
+  membershipId: uuid("membership_id"),
+  ...timestamps,
+}, (table) => [
+  // At most one live challenge per purpose and number. A new request revokes the
+  // current pending row first, which is how "invalidate previously issued OTPs"
+  // is enforced rather than merely documented.
+  uniqueIndex("otp_challenges_one_pending_idx").on(table.purpose, table.phoneNumber).where(sql`status = 'PENDING'`),
+  index("otp_challenges_purpose_phone_created_idx").on(table.purpose, table.phoneNumber, table.createdAt),
+  index("otp_challenges_expires_idx").on(table.expiresAt),
+  foreignKey({
+    columns: [table.schoolId, table.membershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "otp_challenges_school_membership_fk",
+  }).onDelete("restrict"),
+  check("otp_challenges_attempts_check", sql`${table.attemptCount} >= 0 and ${table.attemptCount} <= ${table.maxAttempts}`),
+]);
 
 export const academicYears = pgTable("academic_years", {
   id: uuid("id").defaultRandom().primaryKey(),

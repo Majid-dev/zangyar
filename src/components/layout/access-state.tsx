@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { SignOutButton } from "@/features/auth/components/sign-out-button";
+
 export type AccessState = "UNAUTHENTICATED" | "NO_SCHOOL" | "AMBIGUOUS_SCHOOL" | "FORBIDDEN";
 
 const MESSAGES: Record<AccessState, { title: string; message: string }> = {
@@ -27,6 +29,21 @@ export function accessStateFor(state: AccessState) {
 
 export function AccessState({ state }: { state: AccessState }) {
   const { title, message } = MESSAGES[state];
+  // Only an unauthenticated visitor benefits from a login link; everyone else
+  // already has a session, so the useful action is switching accounts.
+  const action =
+    state === "UNAUTHENTICATED" ? (
+      <Link
+        href="/login"
+        className="mt-6 inline-flex min-h-11 items-center rounded-xl bg-primary px-5 text-sm font-bold text-white transition-colors hover:bg-primary/90"
+      >
+        ورود به حساب
+      </Link>
+    ) : (
+      <div className="mt-6 flex justify-center">
+        <SignOutButton className="border border-border bg-surface" />
+      </div>
+    );
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center p-6">
@@ -34,12 +51,7 @@ export function AccessState({ state }: { state: AccessState }) {
         <p className="text-sm font-bold text-secondary">زنگ‌یار</p>
         <h1 className="mt-3 text-3xl font-black text-primary">{title}</h1>
         <p className="mt-4 leading-8 text-muted">{message}</p>
-        <Link
-          href="/"
-          className="mt-6 inline-flex min-h-11 items-center rounded-xl bg-primary px-5 text-sm font-bold text-white transition-colors hover:bg-primary/90"
-        >
-          بازگشت به صفحه اصلی
-        </Link>
+        {action}
       </section>
     </main>
   );

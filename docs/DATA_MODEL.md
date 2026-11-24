@@ -19,6 +19,9 @@ erDiagram
     SCHOOLS ||--o{ SCHOOL_MEMBERSHIPS : has
     USERS ||--o| PLATFORM_ADMINS : may_be
     SCHOOLS ||--|| SCHOOL_SETTINGS : configures
+    SCHOOL_MEMBERSHIPS ||--o| TEACHER_PROFILES : describes
+    SCHOOL_MEMBERSHIPS ||--o{ TEACHER_REGISTRATIONS : authorizes
+    SCHOOL_MEMBERSHIPS ||--o{ OTP_CHALLENGES : scopes
 
     SCHOOLS ||--o{ ACADEMIC_YEARS : owns
     SCHOOLS ||--o{ GRADES : defines
@@ -56,11 +59,14 @@ erDiagram
 
 | Entity | Ownership | Cardinality and lifecycle |
 |---|---|---|
-| `users` | Global | One account can have many school memberships. Managed with the authentication system. |
+| `users` | Global | One account can have many school memberships. Managed with the authentication system. Login identity is the unique `phoneNumber` (canonical `09XXXXXXXXX`); `phoneNumberVerified` must be true for sign-in. `email` remains a required unique column because Better Auth identity rows still carry one. |
 | `platform_admins` | Platform | Explicit platform authorization for a user; may be revoked without changing school memberships. |
 | `schools` | Tenant root | Created, activated, suspended, and archived. Historical records remain linked. |
-| `school_memberships` | School | Exactly one membership per user/school; each membership has exactly one role, either School Admin or Teacher. Status may be active, suspended, or revoked. |
+| `school_memberships` | School | Exactly one membership per user/school; each membership has exactly one role, either School Admin or Teacher. Status is `ACTIVE`, `SUSPENDED`, `REVOKED`, `PENDING_ADMIN_APPROVAL`, or `REJECTED`. Only `ACTIVE` grants school access, so teacher approval is the transition into it. |
 | `school_settings` | School | One-to-one configuration record; created with or shortly after a school. |
+| `teacher_profiles` | School | One-to-one with a School Membership. Holds teacher-only attributes that are meaningful within a single school: the personnel code (supplied by the teacher at registration, optional, unique per school when present) and the name. Retained when a teacher is deactivated. |
+| `teacher_registrations` | School | An authorized mobile number. Exists before any account does, which is why it is not a membership: `school_memberships.userId` is required. Holds only the number: name and personnel code are the teacher's own details, recorded on the profile at registration. Status is `PENDING` (authorized, unclaimed) or `CLAIMED` (a membership was created); `REVOKED` remains in the enum for rows withdrawn under the earlier model. An unclaimed row is deleted outright when withdrawn, since nothing references it; a claimed row is durable — kept after registration as the record of who authorized what. |
+| `otp_challenges` | School (when tenant-scoped) | One-time codes for mobile verification. Keyed by purpose and normalized number, with attempt count, expiry, and a single-pending rule per purpose and number. Only an HMAC-keyed hash of the code is stored. Separate from Better Auth's `verification` table, which the phone-number plugin fills with plaintext values. |
 
 ### Academic management
 
@@ -100,6 +106,10 @@ erDiagram
 
 ## Recommended fields and constraints
 
+### `users`
+
+Global identity, managed with the authentication system. `phoneNumber` is the login identity and is unique across the platform; it is stored in the canonical Iranian mobile format `09XXXXXXXXX`. `phoneNumberVerified` must be true before the account can sign in. `email` stays required and unique because Better Auth identity rows and account provisioning still provide one. A user identity is never duplicated for joining another school — additional schools are added as additional memberships.
+
 ### `schools`
 
 Identity, name, slug/code, status, timezone (default `Asia/Tehran`), contact fields, and created/updated timestamps. `slug` should be globally unique.
@@ -107,6 +117,24 @@ Identity, name, slug/code, status, timezone (default `Asia/Tehran`), contact fie
 ### `school_memberships`
 
 `schoolId`, `userId`, role, status, created/suspended/revoked timestamps. Recommended unique constraint: `(schoolId, userId)`. The role is a single enum value and must be either `SCHOOL_ADMIN` or `TEACHER`; do not introduce a membership-role join table for the MVP. A Teacher assignment must reference a membership whose role is `TEACHER`.
+
+### `teacher_profiles` and `teacher_registrations`
+
+`teacher_profiles` is one-to-one with a school membership and carries `schoolId`, `membershipId`, `personnelCode`, `firstName`, and `lastName`. `(schoolId, membershipId)` is a composite foreign key into `school_memberships`, so a profile can never describe a membership in another school, and `membershipId` is unique. The personnel code is unique within a school when present, via a partial unique index on `(schoolId, personnelCode) WHERE personnelCode IS NOT NULL`; the same code may exist in another school. It is optional and is supplied by the teacher at registration, because it is their own employment detail rather than something the admin can assert; a School Admin can correct it afterwards. Deactivation suspends the membership and leaves the profile row in place. The profile is created when the teacher registers, because only then does a membership exist to attach it to.
+
+`teacher_registrations` records a mobile number a School Admin has authorized: `schoolId`, `phoneNumber` (canonical `09XXXXXXXXX`), `status`, an optional `membershipId`, and `claimedAt` / `revokedAt` / `createdByUserId`. It carries no name and no personnel code: those are the teacher's own school-local details and belong on the profile their registration creates, so the authorization row holds only what the admin is entitled to assert. A partial unique index on `(schoolId, phoneNumber) WHERE status <> 'REVOKED'` allows one live authorization per number per school, and lets a withdrawn number be authorized again. `(schoolId, membershipId)` is a composite foreign key into `school_memberships`, which tolerates a null membership while unclaimed and enforces same-school once set. A number may be authorized by several schools, and one identity then holds a membership at each.
+
+Withdrawing an unclaimed number deletes the row rather than flagging it: the record is the admin's own assertion about a number nobody owns, so there is no membership, profile, or account to orphan, and the withdrawal is preserved as an audit event written in the same transaction. Deleting also frees the number to be authorized again. Correcting or deleting is refused once the row is `CLAIMED`, because the number is then the person's login identity (ADR-019) — ending their access is a membership decision, not a registration one.
+
+The table is durable rather than consumed on registration: it is the record of who authorized which number, and it keeps an authorized-but-unclaimed number visible to the admin. This is separate from membership state (which answers whether the person may access the school) and from identity (which is created only at registration).
+
+### `otp_challenges`
+
+`purpose`, `phoneNumber` (canonical `09XXXXXXXXX`), `codeHash` (HMAC-SHA256 hex), `status` (`PENDING`/`CONSUMED`/`REVOKED`/`EXHAUSTED`), `attemptCount`, `maxAttempts`, `expiresAt`, `consumedAt`, `revokedAt`, `provider`, and optional `schoolId`/`membershipId`.
+
+Purpose and number together identify a challenge, so a code issued for one purpose cannot satisfy another, and a partial unique index on `(purpose, phoneNumber) WHERE status = 'PENDING'` allows at most one live challenge. Requesting a new code revokes the current pending row first, which is how a resend invalidates the previous code rather than leaving two usable. A composite foreign key on `(schoolId, membershipId)` into `school_memberships` means a tenant-scoped challenge cannot reference another school's membership. A check constraint keeps `attemptCount` within `maxAttempts`.
+
+This table is deliberately not Better Auth's `verification`: that table has no purpose, attempt ceiling, cooldown, or membership link, and its phone-number plugin writes codes in plaintext.
 
 ### `school_settings` notification policy
 
@@ -175,6 +203,9 @@ Include nullable school, actor user, optional actor membership, action, entity t
 | `schools` | Root ID | Tenant root. |
 | `school_memberships` | Yes | Unique school/user and user-to-school membership. |
 | `school_settings` | Yes | One-to-one school foreign key. |
+| `teacher_profiles` | Yes | Composite reference to the membership's own school; unique membership. |
+| `teacher_registrations` | Yes | Composite reference to the membership's own school once claimed; one live authorization per number per school. |
+| `otp_challenges` | Yes (nullable) | Nullable composite reference for tenant-scoped purposes; null for login and password reset, which are not tenant-bound. |
 | `academic_years`, `grades`, `subjects` | Yes | School-scoped unique codes. |
 | `classrooms` | Yes | Composite references to school/year/grade. |
 | `class_teachers` | Yes | Same-school classroom/membership/subject references. |
@@ -205,6 +236,10 @@ Tenant-scoped indexes should normally begin with `schoolId`:
 ```text
 school_memberships(school_id, user_id)
 school_memberships(school_id, role, status)
+teacher_profiles(school_id, last_name, first_name) -- partial unique on (school_id, personnel_code) where not null
+teacher_registrations(school_id, status) -- partial unique on (school_id, phone_number) where not revoked
+otp_challenges(purpose, phone_number, created_at) -- partial unique pending per purpose+number
+otp_challenges(expires_at) -- for later cleanup of lapsed challenges
 academic_years(school_id, status)
 classrooms(school_id, academic_year_id, grade_id)
 class_teachers(school_id, teacher_membership_id)
@@ -244,6 +279,12 @@ audit_logs(actor_user_id, occurred_at)
 - Student lifecycle uses `ACTIVE`, `WITHDRAWN`, `GRADUATED`, and `ARCHIVED`; non-active profiles may be explicitly reactivated, which changes only global profile status and never reopens enrollments or assigns a classroom.
 - Guardian mobile and student national ID are normalized at the application boundary before school-scoped uniqueness checks.
 - Student-guardian relationship rows are retained; new links require a relationship type, and SMS eligibility requires a valid normalized mobile.
+- Teacher registration state is separate from membership state: an authorization answers whether a number may register, a membership answers whether the person may access the school.
+- A provisioned teacher has no credential account until they complete activation, so no enabled sign-in path can authenticate them beforehand.
+- A mobile number may be authorized once per school; withdrawing an unclaimed authorization deletes it and frees the number to be re-added.
+- Approval is the transition into `ACTIVE`, so approving, rejecting, deactivating, and reactivating a teacher are one guarded operation rather than four; the legal moves from each membership status are declared once in the teacher status module.
+- OTP codes are stored only as an HMAC-keyed hash and are single-use; requesting a new code invalidates any outstanding one for the same purpose.
+- A verification code is scoped by purpose as well as by number, so a code issued for one flow cannot satisfy another.
 - PostgreSQL range exclusion enforces non-overlapping enrollment ranges; adjacent `[startDate, endDate)` transfers remain valid.
 
 ## Deferred design questions

@@ -17,6 +17,8 @@ src/
 docs/            Product, architecture, data-model, roadmap, and decision records
 ```
 
+Login lives in the `(auth)` route group, which is public. Everything under `(app)` is authenticated and shares one layout: an unauthenticated visitor is redirected to `/login`, while an authenticated user without usable school context sees the matching access state.
+
 ### Presentation
 
 `src/app` owns route composition, layouts, loading/error states, and HTTP boundaries. React components should not contain direct database access or authorization decisions that are relied on for security.
@@ -113,9 +115,51 @@ Academic-year closure is one server-owned transaction: transition the year to `C
 
 Better Auth manages global identity and secure sessions. Application domain tables remain the source of truth for school membership and school business authorization.
 
-Initial school-level roles are `SCHOOL_ADMIN` and `TEACHER`. Each school membership has exactly one role; a member cannot hold both roles through one membership. Platform Admin authorization is a separate explicit assignment and must never be inferred from a school role.
+The login identity is the Iranian mobile number. The phone-number plugin supplies password-based sign-in and the `phoneNumber` / `phoneNumberVerified` user fields, and `src/lib/mobile.ts` is the single canonicalization point: every accepted spelling (`09…`, `+98…`, `0098…`, bare `9…`, Persian or Arabic digits) normalizes to `09XXXXXXXXX` before storage and before comparison, so input from one path always matches a lookup from another. A phone number must be verified to sign in. OTP delivery is not implemented because no SMS provider exists yet, so the OTP endpoints are disabled rather than left reachable in a non-functional state; verification state is set by an authorized provisioning path. Email/password remains enabled for existing accounts and tests, but the product login surface is mobile-only.
+
+Initial school-level roles are `SCHOOL_ADMIN` and `TEACHER`. Each school membership has exactly one role; a member cannot hold both roles through one membership. Platform Admin authorization is a separate explicit assignment and must never be inferred from a school role. Membership creation accepts only the school-level roles, so a School Admin cannot grant or create platform-level access.
 
 Parent authentication is outside MVP scope.
+
+The demo tenant bootstrap (`src/features/auth/bootstrap/`) is a development operator tool, not an application route. Its environment gate runs before any write and refuses production and non-local databases; it is idempotent, preserves existing credentials and profiles, and creates no platform administrator. See `docs/DEVELOPMENT.md`.
+
+### Teacher registration and approval
+
+A School Admin registers only a mobile number (`src/features/teachers/`). That row in `teacher_registrations` is a durable authorization — "this number may join us" — and is deliberately separate from identity and membership, because a membership requires a `userId` and no account exists until the person registers. No name and no personnel code is asked for: those are the person's own details, so asking the admin for them would record something nobody has confirmed, and the personnel code is a teacher-school attribute that belongs on the profile (ADR-022). Nothing is sent: no invitation link, no SMS. The admin's registration of the number *is* the invitation.
+
+The person then self-registers at the public `/register` page: they enter the number, prove it with an OTP, and supply a name, an optional personnel code, and a password. Eligibility is decided server-side from the authorization rows — the client supplies no school, so a registration cannot be steered at a tenant the person is not authorized for. If two schools authorized the same number, registration produces one global identity with a `PENDING_ADMIN_APPROVAL` membership and a `teacher_profile` at each. The whole completion is one transaction, so a failure cannot leave a half-registered identity. The personnel code is applied to each authorizing school's profile, so that school's partial unique index still governs whether it is free there; a clash surfaces as a conflict the person resolves by choosing another code. A School Admin can later correct the code on the teacher's page, since a typo should be recoverable without a database edit.
+
+Approval is the gate. The states live on `membership_status` (`PENDING_ADMIN_APPROVAL`, `ACTIVE`, `REJECTED`, `SUSPENDED`), and because every authorization path already filters `status = 'ACTIVE'`, a pending or rejected teacher is denied everywhere without any check being edited. Approval, rejection, deactivation, and reactivation are one operation — `setTeacherStatus`, guarded by the transition matrix in `src/features/teachers/status.ts` — because only `ACTIVE` grants access, so approving a pending registration *is* activating the teacher and undoing a rejection is the same transition. Keeping them as separate services meant three copies of the same guard and three places for the rules to drift apart; the matrix is now the single home for "from here, these moves are legal," and both the detail page and the teachers table render the actions it derives rather than deciding for themselves. A registered but unapproved teacher can authenticate — they have a credential — but reaches no school resource and sees the `NO_SCHOOL` access state. Password recovery works for them and deliberately grants nothing: it changes a password, not an approval.
+
+Registration writes identity rows inside the same transaction as the domain rows, using a Better Auth instance bound to that transaction (`authOptions(tx, { transaction: false })` in `src/lib/auth/auth-options.ts`). Without that binding the adapter would check out a separate pooled connection and a rollback would leave an orphan identity holding the mobile number. The registration OTP is verified *before* that transaction opens, so a rejected attempt's counter is not rolled back with it (see ADR-026).
+
+Deactivation suspends the membership rather than deleting anything: access ends immediately while the teacher record and history are retained. A registration whose number was never claimed is deleted outright, because at that point the row is nothing but the admin's own assertion about a number nobody owns — no account, membership, or profile exists to orphan, and the audit event is written inside the same transaction so the record of the withdrawal survives the row. Once the number is claimed, the row becomes the durable record of who authorized it and is retained; ending that teacher's access is deactivation, not deletion.
+
+### OTP verification
+
+`src/lib/otp/` is a provider-independent layer for one-time codes. Business logic depends only on the `OtpProvider` interface — `issueCode()` plus `send()` — and the concrete provider is chosen by configuration in `selection.ts`, the single place that knows which providers exist. A real SMS provider is added later by implementing that interface and extending the selection function, with no change to the OTP service, the activation flow, or the UI. There is no separate `SmsProvider`: an SMS provider is an implementation of `OtpProvider`.
+
+The MVP ships one provider: a Development-only fixed-code implementation that issues a configured constant and writes it to the server log. It is never rendered to a browser, and it cannot be selected in production — the gate in `src/lib/otp/environment.ts` runs from `authOptions()`, so an unsafe production configuration fails at startup rather than on first use. A missing provider is not a startup failure; it is refused when a code is actually requested, which is what lets a production build and boot succeed with no OTP configuration.
+
+Challenges live in `otp_challenges`, keyed by purpose and normalized number, with only an HMAC-keyed hash of the code stored. This is deliberately separate from Better Auth's `verification` table, whose phone-number plugin stores codes in plaintext and has no purpose, attempt ceiling, cooldown, or membership link; those `/phone-number/*` routes stay disabled. Verification is single-use under a row lock, and a failed attempt commits its incremented counter on its own connection — a counter written inside a transaction that then aborts would be rolled back and would permit unlimited guessing.
+
+`/otp/request`, `/otp/verify`, `/otp/login`, and `/otp/reset-password` are Better Auth plugin endpoints (`src/lib/auth/otp-plugin.ts`) rather than Server Actions, because login must set the session cookie and that needs an endpoint context. For login and password reset the request response is uniform whether or not an account exists, so it cannot enumerate members. Purposes are `TEACHER_REGISTRATION`, `LOGIN`, and `PASSWORD_RESET`.
+
+Better Auth's own OTP paths stay closed and `sendOTP` stays a no-op; the plugin's `requireVerification` remains in force, so a phone still has to be verified to sign in with a password.
+
+### Known authorization gaps
+
+These are recorded, not yet closed, and are outside the current slice:
+
+- `requirePlatformAdmin` has no callers yet; platform-level operations such as changing a school's status are currently gated as School Admin of that school.
+- School status is enforced on write and admin paths (`requireOperationalAdmin`, `requireStudentManagementAccess`) but not on every read path.
+- There is no last-admin protection: a School Admin can suspend or revoke every other admin of their school.
+- A number authorized by several schools yields a pending membership at every one of them, and the person cannot decline an individual school. Accepting a subset would need a per-authorization decision the UI does not yet offer.
+- `class_teachers.teacher_membership_id` enforces same-school membership at the database level, but the teacher-role requirement is enforced in the service layer only. The same applies to `teacher_profiles.membership_id`: a foreign key cannot express "this membership has the TEACHER role".
+- `/sign-up/email` remains enabled because several existing integration suites depend on it. It creates a user with no membership, which `getSchoolContext` refuses as `NO_SCHOOL`, so it is not a tenant bypass — but it is an unauthenticated account-creation surface and should be reviewed before production.
+- OTP login mints a session for any account with a verified mobile number, including one with no school membership. That holder then sees the `NO_SCHOOL` access state, which is consistent with how a memberless session is already treated — but it does mean a session can exist for a user with no school.
+- A failed verification's attempt counter is committed on a separate connection from the caller's transaction. That is deliberate (see above), but it means the counter write is not atomic with the caller's own rollback.
+
 
 ## Audit architecture
 
@@ -147,8 +191,26 @@ The initial Phase 3 authorization boundary is now in place in `src/lib/auth/auth
 - Ambiguous membership context, missing membership, unauthenticated access, wrong role, and missing Platform Admin access are rejected.
 - Membership mutations use Zod validation, tenant-scoped updates, transactions, and audit events in `src/features/memberships/services.ts`.
 - Pure active-school selection tests cover missing, ambiguous, matching, and cross-tenant selectors.
+- Login identity is the normalized Iranian mobile number, and the public `(auth)/login` route is the only product credential surface.
+- Persisted coverage runs through `corepack pnpm test:integration:auth` in an ephemeral migrated database: mobile login success and failure, OTP endpoint closure, demo seed idempotency and password preservation, and tenant/role isolation.
 
-Remaining Phase 3 work: complete persisted authorization verification and continue domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions.
+Remaining Phase 3 work: continue domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions; close the known authorization gaps listed above.
+
+### Teacher registration slice
+
+Teacher registration replaces the earlier invitation flow and is complete: School Admin management of authorized mobile numbers (list searched by name, mobile, and personnel code, filtered by derived status, add, correct or delete while unclaimed), the public `/register` flow (mobile, OTP, name, optional personnel code, and password), and one status decision — approve, reject, deactivate, or reactivate — driven by a single transition matrix and available from both the teachers table and the teacher's page. Persisted coverage runs through `corepack pnpm test:integration:teachers` in an ephemeral migrated database, including a transaction-atomicity case proving a rolled-back registration leaves no orphan identity, a case proving a registration cannot reference another school's membership, a case proving a deleted authorization leaves no membership or profile behind and remains on the audit trail, and cases proving the teacher-supplied personnel code lands on their profile and that registering without one is allowed.
+
+Known limits in this slice: no SMS or email provider exists, so the registration code is the Development fixed code written to the server log; a number authorized by several schools yields a pending membership at each, and the person cannot decline one; and the teacher-role requirement on a profile's membership is enforced in the service layer only.
+
+### OTP verification slice
+
+OTP verification is complete: a provider-independent service whose delivery provider is selected by configuration, a Development-only fixed-code provider, purpose-specific challenges (`TEACHER_REGISTRATION`, `LOGIN`, `PASSWORD_RESET`) with keyed-hashed storage, expiry, attempt ceilings, resend cooldown, and per-number rate limiting, plus a production gate that refuses the fixed-code provider at startup. Teacher registration requires a valid code before any identity is created, and OTP login and password reset are wired end to end.
+
+The `/otp/*` endpoints serve only account-bound purposes; `TEACHER_REGISTRATION` is issued by the teacher feature, whose eligibility rule is "a School Admin authorized this number" rather than "an account exists", and the endpoint refuses that purpose explicitly.
+
+Persisted coverage runs through `corepack pnpm test:integration:otp` in an ephemeral migrated database, covering issuance, keyed-hashed storage, one-time use, expiry, attempt exhaustion, purpose isolation, resend cooldown, rate limiting, tenant-scoped linkage, anti-enumeration, and session minting. Unit tests cover the pure policy and the production gate with injected inputs.
+
+Known limits: no real SMS provider yet (the `sms` name is reserved and refused rather than faked); expired challenges are retained rather than swept, with an index in place for a future cleanup job; and email/password reset through Better Auth's own routes remains disabled in favour of the OTP flow.
 
 ## Phase 4 implementation status
 

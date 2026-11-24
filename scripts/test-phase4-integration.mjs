@@ -40,7 +40,7 @@ try {
     throw new Error(`Migration failed with exit code ${migrate.status ?? 1}`);
   }
 
-  const test = spawnSync("corepack", ["pnpm", "test", "--", "src/features/academics/academics.integration.test.ts"], {
+  const test = spawnSync("corepack", ["pnpm", "test", "src/features/academics/academics.integration.test.ts"], {
     env: {
       ...process.env,
       DATABASE_URL: testUrl.toString(),

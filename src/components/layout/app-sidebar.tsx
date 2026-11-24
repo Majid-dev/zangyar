@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { SignOutButton } from "@/features/auth/components/sign-out-button";
 import { AppNav } from "./app-nav";
 import type { NavSection } from "./nav-items";
 
@@ -25,9 +26,12 @@ export function SidebarBrand() {
 
 export function SidebarFooter({ schoolName, academicYearLabel }: { schoolName: string; academicYearLabel: string | null }) {
   return (
-    <div className="rounded-xl bg-sage/70 p-3">
-      <p className="text-xs font-bold text-primary">{schoolName}</p>
-      <p className="mt-1 text-[11px] text-muted">{academicYearLabel ? `سال تحصیلی ${academicYearLabel}` : "سال تحصیلی فعالی ثبت نشده"}</p>
+    <div className="space-y-2">
+      <div className="rounded-xl bg-sage/70 p-3">
+        <p className="text-xs font-bold text-primary">{schoolName}</p>
+        <p className="mt-1 text-[11px] text-muted">{academicYearLabel ? `سال تحصیلی ${academicYearLabel}` : "سال تحصیلی فعالی ثبت نشده"}</p>
+      </div>
+      <SignOutButton className="w-full justify-center" />
     </div>
   );
 }

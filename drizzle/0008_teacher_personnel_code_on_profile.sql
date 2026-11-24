@@ -1,0 +1,16 @@
+-- Move the personnel code from the authorization to the teacher's own profile.
+--
+-- The code is a teacher-school attribute, and ADR-022 already put teacher-school
+-- attributes on `teacher_profiles`. It was briefly carried on
+-- `teacher_registrations` so the admin could set it while authorizing a number,
+-- but the registration row exists before any person does and the admin is not
+-- entitled to assert the teacher's own employment details. The teacher now
+-- supplies it when they register, which is the same moment the profile is
+-- created, so the registration copy has no reader left.
+--
+-- Existing profiles keep their personnel code: they were copied from the
+-- registration at completion and remain valid. Only the duplicated column goes.
+-- A code sitting on an *unclaimed* registration is discarded with it; under the
+-- new model the teacher supplies their own code at registration, so that value
+-- was an admin's intent rather than a fact, and nothing reads it.
+ALTER TABLE "teacher_registrations" DROP COLUMN "personnel_code";
