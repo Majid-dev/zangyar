@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { SignOutButton } from "@/features/auth/components/sign-out-button";
 
-export type AccessState = "UNAUTHENTICATED" | "NO_SCHOOL" | "AMBIGUOUS_SCHOOL" | "FORBIDDEN";
+export type AccessState = "UNAUTHENTICATED" | "NO_SCHOOL" | "FORBIDDEN";
 
 const MESSAGES: Record<AccessState, { title: string; message: string }> = {
   UNAUTHENTICATED: {
@@ -12,10 +12,6 @@ const MESSAGES: Record<AccessState, { title: string; message: string }> = {
   NO_SCHOOL: {
     title: "دسترسی مدرسه یافت نشد",
     message: "این حساب هنوز عضویت فعال مدرسه ندارد. برای دسترسی، از مدیر مدرسه بخواهید شما را به مدرسه اضافه کند.",
-  },
-  AMBIGUOUS_SCHOOL: {
-    title: "انتخاب مدرسه نامشخص است",
-    message: "این حساب در بیش از یک مدرسه عضویت فعال دارد و انتخاب مدرسه در این نسخه پشتیبانی نمی‌شود.",
   },
   FORBIDDEN: {
     title: "دسترسی محدود است",

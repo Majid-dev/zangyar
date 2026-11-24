@@ -19,7 +19,8 @@
     "test:integration:phase5": "node scripts/test-phase5-integration.mjs",
     "test:integration:phase6": "node scripts/test-phase6-integration.mjs",
     "test:integration:teachers": "node scripts/test-teachers-integration.mjs",
-    "test:integration:otp": "node scripts/test-otp-integration.mjs"
+    "test:integration:otp": "node scripts/test-otp-integration.mjs",
+    "test:integration:account": "node scripts/test-account-integration.mjs"
   },
   "dependencies": {
     "better-auth": "^1.7.25",

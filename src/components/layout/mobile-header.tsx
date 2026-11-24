@@ -2,14 +2,26 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ProfileMenu } from "@/features/account/components/profile-menu";
+import type { ShellProfile } from "@/features/account/profile";
 import { SidebarBrand, SidebarChrome } from "./app-sidebar";
 import type { NavSection } from "./nav-items";
 
+type MobileNavProps = {
+  sections: readonly NavSection[];
+  schoolName: string;
+  academicYearLabel: string | null;
+  profile: ShellProfile;
+  active?: string;
+};
+
 /**
- * Tablet and mobile get the same navigation as desktop, presented as a drawer.
- * State is component state (not persisted) so a reload always starts closed.
+ * Tablet and mobile get the same navigation as desktop, presented as a drawer,
+ * plus the account control in the header rather than at the foot of a drawer the
+ * user has to open first. Drawer state is component state, not persisted, so a
+ * reload always starts closed.
  */
-export function MobileNav({ sections, schoolName, academicYearLabel, active }: { sections: readonly NavSection[]; schoolName: string; academicYearLabel: string | null; active?: string }) {
+export function MobileNav({ sections, schoolName, academicYearLabel, profile, active }: MobileNavProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -29,19 +41,22 @@ export function MobileNav({ sections, schoolName, academicYearLabel, active }: {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-surface/95 px-4 py-3 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-2.5 backdrop-blur lg:hidden">
         <SidebarBrand />
-        <button
-          ref={triggerRef}
-          type="button"
-          aria-label="باز کردن منوی ناوبری"
-          aria-expanded={open}
-          aria-controls="mobile-navigation"
-          onClick={() => setOpen(true)}
-          className="flex size-10 items-center justify-center rounded-xl text-xl text-primary hover:bg-sage"
-        >
-          ☰
-        </button>
+        <div className="flex items-center gap-1.5">
+          <ProfileMenu profile={profile} variant="sheet" />
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label="باز کردن منوی ناوبری"
+            aria-expanded={open}
+            aria-controls="mobile-navigation"
+            onClick={() => setOpen(true)}
+            className="flex size-10 items-center justify-center rounded-xl text-xl text-primary hover:bg-sage"
+          >
+            ☰
+          </button>
+        </div>
       </header>
 
       {open ? (
@@ -55,7 +70,18 @@ export function MobileNav({ sections, schoolName, academicYearLabel, active }: {
               </button>
             </div>
             <div className="mt-8 flex-1 overflow-y-auto">
-              <SidebarChrome sections={sections} schoolName={schoolName} academicYearLabel={academicYearLabel} active={active} onNavigate={() => setOpen(false)} />
+              {/* The account control is left out here: it already sits in the
+                  header beside this trigger, so repeating it would put two
+                  identical controls on one screen. */}
+              <SidebarChrome
+                sections={sections}
+                schoolName={schoolName}
+                academicYearLabel={academicYearLabel}
+                profile={profile}
+                active={active}
+                onNavigate={() => setOpen(false)}
+                showProfile={false}
+              />
             </div>
           </div>
         </div>

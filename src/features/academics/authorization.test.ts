@@ -23,6 +23,9 @@ function queryChain<T extends readonly unknown[]>(result: T) {
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    // Active-school resolution orders candidate memberships so an unselected user
+    // always lands in the same school, so the chain must remain resolvable after it.
+    orderBy: vi.fn().mockResolvedValue(result),
     limit: vi.fn().mockResolvedValue(result),
   });
 }

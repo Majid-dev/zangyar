@@ -144,6 +144,7 @@ corepack pnpm db:test-clean            # migrations apply cleanly to an empty da
 corepack pnpm test:integration:auth    # auth, demo seed, and tenant isolation
 corepack pnpm test:integration:teachers # teacher registration, approval, and tenant isolation
 corepack pnpm test:integration:otp     # OTP issuance, verification, and the production gate
+corepack pnpm test:integration:account # account settings, school switching, and name/tenant scoping
 corepack pnpm test:integration:phase4
 corepack pnpm test:integration:phase5
 corepack pnpm test:integration:phase6

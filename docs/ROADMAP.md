@@ -68,6 +68,14 @@ This roadmap separates product/design decisions from implementation work. Produc
 - Teacher registration requires a valid code before any identity is created; OTP login and password reset are wired end to end.
 - Persisted coverage via `test:integration:otp`.
 
+### Account settings and school switching
+
+- Account control in the application shell for every signed-in user: avatar with initials, name, school-level role, and the active school; a Settings item; and sign-out.
+- Dropdown items: school switching for teachers with more than one school only (School Admins and single-school teachers never see it), Settings, and sign-out. Popover on desktop, bottom sheet on mobile, with Escape and click-outside closing and focus returning to the trigger.
+- School switching resolves the target against the user's verified active memberships server-side and persists the choice as a preference cookie that can only ever select among them (ADR-029). Sign-out clears it along with the session.
+- `/settings`: edit first and last name (written to the account and to the active school's teacher profile), read-only mobile number, and a password change requiring the current password with per-field visibility toggles.
+- Persisted coverage via `test:integration:account`, including forged preference and cross-user switch attempts.
+
 **Remaining:** a real SMS provider (the `sms` provider name is reserved and currently refused), expired-challenge cleanup, and Platform Admin operations. See the known authorization gaps in `docs/ARCHITECTURE.md`.
 
 **Exit criteria:** Protected operations reject unauthenticated users, invalid memberships, wrong roles, wrong tenants, and unauthorized resource access.

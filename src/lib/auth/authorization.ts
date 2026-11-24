@@ -1,18 +1,20 @@
 import "server-only";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { platformAdmins, schoolMemberships, schools } from "@/lib/db/schema";
 
+import { readActiveSchoolPreference } from "./active-school";
 import {
   AuthorizationError,
   selectActiveMembership,
+  selectPreferredMembership,
   type SchoolRole,
 } from "./authorization-core";
 
-export { AuthorizationError, selectActiveMembership } from "./authorization-core";
+export { AuthorizationError, selectActiveMembership, selectPreferredMembership } from "./authorization-core";
 
 export type ActiveSchoolMembership = {
   membershipId: string;
@@ -54,9 +56,17 @@ export async function requireSchoolAccess(options: {
         eq(schoolMemberships.status, "ACTIVE"),
         options.schoolId ? eq(schoolMemberships.schoolId, options.schoolId) : undefined,
       ),
-    );
+    )
+    // A stable order, so the school opened when no selection is stored is the
+    // user's first membership rather than whichever row the planner returned.
+    .orderBy(asc(schoolMemberships.createdAt), asc(schoolMemberships.id));
 
-  const membership = selectActiveMembership(rows, options.schoolId);
+  // An explicit `schoolId` is a caller naming one school and is held to the strict
+  // rule: no verified membership there means denial. Without one, the persisted
+  // selection — itself only ever one of these rows — decides which school opens.
+  const membership = options.schoolId
+    ? selectActiveMembership(rows, options.schoolId)
+    : selectPreferredMembership(rows, readActiveSchoolPreference(options.headers));
 
   if (options.roles && !options.roles.includes(membership.role)) {
     throw new AuthorizationError("FORBIDDEN", "This school role is not authorized for the operation.");

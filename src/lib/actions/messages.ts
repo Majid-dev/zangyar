@@ -83,6 +83,10 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "Teacher registration not found.": "ثبت‌نام دبیر پیدا نشد.",
   "Teacher profile not found.": "پرونده‌ی دبیر پیدا نشد.",
   "Training or configuration data is invalid.": "اطلاعات واردشده معتبر نیست.",
+  // Account settings
+  "The current password is incorrect.": "گذرواژه‌ی فعلی درست نیست.",
+  "This account has no password credential.": "این حساب گذرواژه ندارد؛ برای تعیین گذرواژه با مدیر مدرسه تماس بگیرید.",
+  "The new password is too short.": "گذرواژه‌ی تازه باید حداقل ۸ نویسه باشد.",
 };
 
 const TRUNCATION = 300;

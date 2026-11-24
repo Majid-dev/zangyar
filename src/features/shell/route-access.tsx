@@ -12,7 +12,7 @@ export type PageAccess =
   | { blocked: null; headers: Headers; context: ActiveSchoolMembership };
 
 export class SchoolContextError extends Error {
-  constructor(public readonly reason: "UNAUTHENTICATED" | "NO_SCHOOL" | "AMBIGUOUS_SCHOOL") {
+  constructor(public readonly reason: "UNAUTHENTICATED" | "NO_SCHOOL") {
     super(reason);
     this.name = "SchoolContextError";
   }
@@ -22,6 +22,10 @@ export class SchoolContextError extends Error {
  * Resolves the authenticated user's verified school context once per request.
  * `cache` dedupes the session and membership lookups across the layout and the
  * page, so role gating stays in one place without extra database round trips.
+ *
+ * Several memberships are no longer a dead end: `requireSchoolRole` selects among
+ * them using the persisted preference, so only "authenticated but no active
+ * membership anywhere" reaches `NO_SCHOOL`.
  */
 export const getSchoolContext = cache(async (): Promise<ActiveSchoolMembership> => {
   const requestHeaders = await headers();
@@ -32,7 +36,6 @@ export const getSchoolContext = cache(async (): Promise<ActiveSchoolMembership> 
   try {
     return await requireSchoolRole({ headers: requestHeaders, roles: ["SCHOOL_ADMIN", "TEACHER"] });
   } catch (error) {
-    if (error instanceof AuthorizationError && error.code === "AMBIGUOUS_SCHOOL") throw new SchoolContextError("AMBIGUOUS_SCHOOL");
     if (error instanceof AuthorizationError && error.code === "UNAUTHENTICATED") throw new SchoolContextError("UNAUTHENTICATED");
     throw new SchoolContextError("NO_SCHOOL");
   }
