@@ -6,9 +6,9 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
  * ## Why the hash is keyed
  *
  * A six-digit code has only 10^6 possible values. A bare SHA-256 of it would be
- * exhaustible offline in milliseconds from a leaked row, unlike the 256-bit
- * invitation tokens in `src/features/teachers/tokens.ts`, where a plain digest is
- * the correct primitive because the input already has full entropy.
+ * exhaustible offline in milliseconds from a leaked row — unlike a high-entropy
+ * secret such as a 256-bit random token, where a plain digest is the correct
+ * primitive because the input already carries full entropy.
  *
  * The code is therefore hashed with HMAC-SHA256 under a server-side secret, so a
  * database-only leak yields nothing brute-forceable without the application

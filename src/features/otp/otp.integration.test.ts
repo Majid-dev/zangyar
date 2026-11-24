@@ -15,7 +15,6 @@ import {
   schoolSettings,
   schools,
   sessions,
-  teacherInvitations,
   teacherProfiles,
   users,
 } from "@/lib/db/schema";
@@ -96,7 +95,6 @@ async function createSchoolAdmin(suffix: string) {
 async function deleteSchool(schoolId: string) {
   const db = getDb();
   await db.delete(otpChallenges).where(eq(otpChallenges.schoolId, schoolId));
-  await db.delete(teacherInvitations).where(eq(teacherInvitations.schoolId, schoolId));
   await db.delete(teacherProfiles).where(eq(teacherProfiles.schoolId, schoolId));
   await db.delete(auditLogs).where(eq(auditLogs.schoolId, schoolId));
   await db.delete(schoolMemberships).where(eq(schoolMemberships.schoolId, schoolId));
@@ -130,7 +128,7 @@ describe.skipIf(!canRun)("OTP verification service", () => {
   });
 
   it("stores only a keyed hash of the code, never the code", async () => {
-    await requestOtp({ purpose: "TEACHER_ACTIVATION", mobile: "09125550001" });
+    await requestOtp({ purpose: "TEACHER_REGISTRATION", mobile: "09125550001" });
 
     const [row] = await getDb()
       .select()
@@ -221,7 +219,7 @@ describe.skipIf(!canRun)("OTP verification service", () => {
 
     // The same number and the same fixed code, but the wrong purpose.
     await expect(
-      verifyOtp({ purpose: "TEACHER_ACTIVATION", mobile: "09125550007", code: FIXED_CODE }),
+      verifyOtp({ purpose: "TEACHER_REGISTRATION", mobile: "09125550007", code: FIXED_CODE }),
     ).rejects.toThrow(OtpError);
 
     // The intended purpose still works, so the challenge was untouched.
@@ -291,7 +289,7 @@ describe.skipIf(!canRun)("OTP verification service", () => {
     const mobile = "09125550011";
     await requestOtp({ purpose: "LOGIN", mobile }, { config });
     await requestOtp({ purpose: "PASSWORD_RESET", mobile }, { config });
-    await requestOtp({ purpose: "TEACHER_ACTIVATION", mobile }, { config });
+    await requestOtp({ purpose: "TEACHER_REGISTRATION", mobile }, { config });
 
     const refusal = await requestOtp({ purpose: "LOGIN", mobile }, { config }).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(OtpError);
@@ -306,7 +304,7 @@ describe.skipIf(!canRun)("OTP verification service", () => {
 
   it("links a challenge to a membership and cannot cross tenants", async () => {
     await requestOtp({
-      purpose: "TEACHER_ACTIVATION",
+      purpose: "TEACHER_REGISTRATION",
       mobile: "09125550012",
       schoolId: admin.schoolId,
       membershipId: admin.membershipId,
@@ -323,7 +321,7 @@ describe.skipIf(!canRun)("OTP verification service", () => {
     // composite foreign key rejects it even though both ids are individually valid.
     await expect(
       getDb().insert(otpChallenges).values({
-        purpose: "TEACHER_ACTIVATION",
+        purpose: "TEACHER_REGISTRATION",
         phoneNumber: "09125550013",
         codeHash: hashOtpCode(FIXED_CODE, getOtpConfig().hashSecret),
         maxAttempts: 3,
@@ -343,14 +341,12 @@ describe.skipIf(!canRun)("OTP verification service", () => {
 });
 
 describe.skipIf(!canRun)("OTP HTTP endpoints", () => {
-  it("issues a code through the request endpoint without returning it", async () => {
-    const response = await post("/otp/request", { purpose: "TEACHER_ACTIVATION", mobile: "09125551001" });
-    expect(response.status).toBe(200);
-
-    const body = (await response.json()) as Record<string, unknown>;
-    expect(body.ok).toBe(true);
-    // The code must never appear in the response body.
-    expect(JSON.stringify(body)).not.toContain(FIXED_CODE);
+  it("refuses TEACHER_REGISTRATION, which is served by the teacher feature", async () => {
+    // Registration eligibility is "an admin authorized this number", which only the
+    // teacher feature knows. These endpoints must not issue a code for it, or a
+    // number no school authorized could be challenged.
+    const response = await post("/otp/request", { purpose: "TEACHER_REGISTRATION", mobile: "09125551001" });
+    expect(response.status).toBe(400);
   });
 
   it("reports the same success for an unknown number on a non-revealing purpose", async () => {
@@ -362,16 +358,16 @@ describe.skipIf(!canRun)("OTP HTTP endpoints", () => {
     expect(await unknown.json()).toEqual(await known.json());
   });
 
-  it("verifies a code through the verify endpoint and rejects a wrong one", async () => {
-    // TEACHER_ACTIVATION is a revealing purpose, so a challenge is issued for any
-    // well-formed number. A LOGIN request would deliberately create nothing here,
-    // because this number has no account and the response must not reveal that.
-    await post("/otp/request", { purpose: "TEACHER_ACTIVATION", mobile: "09125551003" });
+  it("verifies a code issued directly through the service", async () => {
+    // The registration purpose is not served by these endpoints (it is issued by
+    // the teacher feature, which knows the eligibility rule), so the challenge is
+    // created through the service and only the verification goes over HTTP.
+    await requestOtp({ purpose: "TEACHER_REGISTRATION", mobile: "09125551003" });
 
-    const wrong = await post("/otp/verify", { purpose: "TEACHER_ACTIVATION", mobile: "09125551003", code: "000000" });
+    const wrong = await post("/otp/verify", { purpose: "TEACHER_REGISTRATION", mobile: "09125551003", code: "000000" });
     expect(wrong.status).toBe(400);
 
-    const right = await post("/otp/verify", { purpose: "TEACHER_ACTIVATION", mobile: "09125551003", code: FIXED_CODE });
+    const right = await post("/otp/verify", { purpose: "TEACHER_REGISTRATION", mobile: "09125551003", code: FIXED_CODE });
     expect(right.status).toBe(200);
   });
 
@@ -402,26 +398,26 @@ describe.skipIf(!canRun)("OTP HTTP endpoints", () => {
     await deleteIdentity(user.id);
   });
 
-  it("refuses a TEACHER_ACTIVATION code at the login endpoint", async () => {
-    await post("/otp/request", { purpose: "TEACHER_ACTIVATION", mobile: "09125551005" });
+  it("refuses a TEACHER_REGISTRATION code at the login endpoint", async () => {
+    await requestOtp({ purpose: "TEACHER_REGISTRATION", mobile: "09125551005" });
 
-    // Purpose-scoped: a code obtained for activation cannot mint a session.
+    // Purpose-scoped: a code obtained for registration cannot mint a session.
     const response = await post("/otp/login", { mobile: "09125551005", code: FIXED_CODE });
     expect(response.status).toBe(401);
   });
 
-  it("throttles a single number through the request endpoint", async () => {
+  it("throttles a single number through the service", async () => {
     // Better Auth's own rate limiting is enabled only in production, so the
     // endpoint-level throttle cannot be exercised here. What actually bounds a
-    // target in every environment is the per-number cooldown and window, which the
-    // service enforces — so that is what this asserts through the HTTP boundary.
+    // target in every environment is the per-number cooldown, so that is what is
+    // asserted — through the service, since the endpoint only serves account-bound
+    // purposes and this number has no account.
     const mobile = "09125552001";
-    const first = await post("/otp/request", { purpose: "TEACHER_ACTIVATION", mobile });
-    expect(first.status).toBe(200);
+    await requestOtp({ purpose: "TEACHER_REGISTRATION", mobile });
 
-    const second = await post("/otp/request", { purpose: "TEACHER_ACTIVATION", mobile });
-    // A revealing purpose reports the refusal; the point is that it is refused.
-    expect(second.status).toBe(429);
+    const refusal = await requestOtp({ purpose: "TEACHER_REGISTRATION", mobile }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(OtpError);
+    expect((refusal as OtpError).code).toBe("COOLDOWN");
   });
 
   it("keeps Better Auth's own phone-number OTP endpoints closed", async () => {

@@ -6,8 +6,8 @@ import { Client } from "pg";
 import { config } from "dotenv";
 
 /**
- * Runs the persisted teacher provisioning and invitation suites inside an
- * ephemeral, freshly migrated database so they never touch local development data.
+ * Runs the persisted teacher registration suites inside an ephemeral, freshly
+ * migrated database so they never touch local development data.
  *
  * Usage: corepack pnpm test:integration:teachers
  */
@@ -33,7 +33,6 @@ let created = false;
 const SUITES = [
   "src/features/teachers/auth-transaction.integration.test.ts",
   "src/features/teachers/teachers.integration.test.ts",
-  "src/features/teachers/invitations.integration.test.ts",
 ];
 
 try {

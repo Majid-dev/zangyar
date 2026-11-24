@@ -8,7 +8,7 @@
  * helper so components do not hand-roll fetch calls or have to know the paths.
  */
 
-type OtpPurpose = "TEACHER_ACTIVATION" | "LOGIN" | "PASSWORD_RESET";
+type OtpPurpose = "TEACHER_REGISTRATION" | "LOGIN" | "PASSWORD_RESET";
 
 type OtpResponse = { ok?: boolean; message?: string };
 

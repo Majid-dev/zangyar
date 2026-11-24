@@ -50,6 +50,20 @@
       "when": 1796604800000,
       "tag": "0006_otp_challenges",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1797200000000,
+      "tag": "0007_teacher_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1797200000001,
+      "tag": "0008_teacher_personnel_code_on_profile",
+      "breakpoints": true
     }
   ]
 }

@@ -160,9 +160,55 @@ This file records product and architecture decisions for the initial MVP. Decisi
 
 **Rationale:** Native option popup styling is OS/browser-controlled and inconsistent. A shared control gives ZangYar consistent radius, spacing, focus, hover, and selection treatment without introducing unnecessary dependencies.
 
-## ADR-021: Separate teacher invitation state from membership and identity state
+## ADR-025: Register teachers by authorized mobile number, with admin approval
+
+**Status:** Accepted (supersedes ADR-021)
+
+**Decision:** A School Admin registers only a mobile number — no name, no account, no invitation. That row in `teacher_registrations` is a durable authorization: "this number may join us". The person then self-registers at a public page by entering the number, proving it with an OTP, and supplying their own name and password. Registration creates one global identity (reused if the number already has one) and, for every school that authorized the number, a `TEACHER` membership in `PENDING_ADMIN_APPROVAL` plus a `teacher_profile` carrying the supplied name. Access is granted only when the admin approves, which moves the membership to `ACTIVE`. Rejection moves it to `REJECTED`.
+
+**Rationale:** Invitations inverted the wrong way round: the admin asserted a person's name before any account existed, and the delivery of a link was a manual step with nothing to send it. Registering the number instead means the school's only claim is the one it is actually entitled to make — that a number may join — and the person supplies their own identity. It also removes the invitation token entirely, along with the plaintext-link handling it required.
+
+Placing the approval states on `membership_status` rather than a parallel column is what makes the gate trustworthy: every existing authorization path already filters `status = 'ACTIVE'`, so a pending or rejected teacher is denied everywhere without a single check being edited, and there is no path that could forget to consult a second table.
+
+**Consequences:** `teacher_invitations` and its token helpers are removed; the drop is dependency-clean because nothing referenced that table. The registration row is durable rather than consumed, so an authorized-but-unclaimed number stays visible to the admin and the record of who authorized it survives. A number may be authorized once per school, enforced by a partial unique index; withdrawing an authorization on an unclaimed number deletes the row and frees the number to be re-added (see ADR-027). A mobile can be authorized by two schools, and registration then yields one identity with a pending membership at each. Mobile correction is allowed while the number is unclaimed and refused afterwards, because the number is the login identity once the person owns it. The personnel code is the teacher's to supply at registration rather than the admin's (see ADR-028). The registration OTP is verified before the completion transaction opens, so a wrong code's attempt counter is not rolled back with the transaction that rejects it.
+
+## ADR-027: Treat teacher approval as the activation transition, not a separate workflow
 
 **Status:** Accepted
+
+**Decision:** Teacher management keeps exactly two storage axes and no more. `teacher_registrations.status` answers *authorization* — may this number register? — and runs `PENDING → CLAIMED`, terminal either way. `school_memberships.status` answers *access* — may this person use the school? — and carries `PENDING_ADMIN_APPROVAL`, `ACTIVE`, `REJECTED`, `SUSPENDED`. Because only `ACTIVE` grants access, approving a pending registration *is* activating the teacher, so approval, rejection, deactivation, and reactivation collapse into one service (`setTeacherStatus`) guarded by one transition matrix, with `ACTIVE → SUSPENDED` as deactivation and any return to `ACTIVE` as approval or reactivation. Withdrawing an unclaimed authorization deletes the registration row; withdrawing a claimed one is deactivation of the membership.
+
+**Rationale:** Two columns exist because the two questions are genuinely different — an authorization can exist with no person attached to it, which is why the registration row and not the membership is the anchor — so merging them into one status column would conflate "may register" with "may access" and make an authorized-but-unclaimed number indistinguishable from a rejected teacher. The redundancy was not in storage but in vocabulary and code: three services (`approveTeacher`, `rejectTeacher`, `setTeacherMembershipStatus`) each re-derived the same legality question, three audit action names described one kind of event, and the UI offered a different control depending on which page you were on. One matrix means a state can only be reached by a move that was declared legal, and both surfaces render the actions that matrix derives instead of deciding for themselves.
+
+Deleting rather than flagging an unclaimed authorization follows from what the row is: the admin's own assertion about a number nobody owns. There is no membership, profile, or account to orphan — verified by test rather than argued — so keeping a tombstone row would preserve nothing while still occupying the uniqueness slot. The audit event is written inside the same transaction, so the withdrawal outlives the row it describes. Once the number is claimed the row *is* the durable record of who authorized it, so it is retained and the access decision moves to the membership, consistent with ADR-012's archive-over-delete rule.
+
+**Consequences:** `REJECTED` is reachable from `PENDING_ADMIN_APPROVAL` and recoverable through the same transition that approves a pending teacher; an `ACTIVE` teacher cannot be rejected, only deactivated, because rejection is a decision about a registration rather than a way to end access. `REVOKED` remains in the `teacher_registration_status` enum for rows withdrawn under the earlier model, and now only means "deletable but no longer correctable". Every write is a compare-and-set on the status just read, so concurrent decisions produce a reported conflict rather than a silent overwrite. The transition matrix is pure and unit-tested on its own, including that no transition ends where it started and that no loss of access is a one-way door.
+
+## ADR-028: Keep the personnel code on the teacher's profile, supplied at registration
+
+**Status:** Accepted
+
+**Decision:** The personnel code is stored only on `teacher_profiles`, and it is supplied by the teacher in the public registration form rather than by the School Admin authorizing the number. `teacher_registrations` carries no name and no personnel code — only the number, its status, and the resulting membership. The field is optional, and a School Admin can correct it after registration from the teacher's page.
+
+**Rationale:** The personnel code is a school-local employment attribute of the teacher, which is exactly what ADR-022 established `teacher_profiles` for. It was briefly duplicated onto `teacher_registrations` so the admin could set it while authorizing a number, but that row exists before any person does, and the admin is not entitled to assert a teacher's own employment details — the same reasoning that already kept the teacher's *name* out of the admin's form. Once the teacher supplies it, the registration copy has no reader left: both are written at the same moment, when registration creates the profile. Removing the column instead of leaving a dead duplicate is what keeps "the admin asserts only that a number may join" a property of the schema rather than a convention.
+
+Leaving it optional matters because not every school issues personnel codes, and a required field would let such a school's configuration block its own teachers from registering. The per-school partial unique index still applies at registration, so a code already taken at one authorizing school surfaces as a conflict the person can resolve; that is the correct place for the check, because the code's uniqueness is a school-local fact.
+
+**Consequences:** `teacher_registrations.personnel_code` is dropped, so a code that an admin had set on an *unclaimed* registration is discarded — it was an unconfirmed intent, not a fact, and nothing read it. Existing profiles keep their code, since it was already copied there at completion. Admin list search and sorting for the code now read the profile, which means an unregistered number no longer matches a personnel-code filter — it has no code yet. A wrong code is recoverable through the existing teacher edit form rather than requiring a database edit.
+
+## ADR-026: Verify the registration OTP outside the completion transaction
+
+**Status:** Accepted
+
+**Decision:** `completeTeacherRegistration` verifies and consumes the OTP *before* opening its transaction, rather than inside it.
+
+**Rationale:** The attempt counter must survive a rejected attempt, or the ceiling is meaningless. Attempting to write that counter from a second connection while the caller's transaction holds the row lock deadlocks, and writing it inside the transaction means the abort rolls it back. Verifying first is the only arrangement that both keeps the limit real and keeps the transaction short. The cost is that a code is consumed even when the subsequent transaction fails (for example, when no school authorized the number); that is acceptable because the failure mode is "the code is spent", which is the safe direction.
+
+**Consequences:** A caller that verifies inside its own transaction still gets correct single-use behaviour, but the attempt ceiling holds only if that caller commits. Nothing in the application does this; the OTP service documents the constraint on `VerifyOtpOptions.tx`.
+
+## ADR-021: Separate teacher invitation state from membership and identity state
+
+**Status:** Superseded by ADR-025
 
 **Decision:** A teacher is provisioned by a School Admin, never by self-registration. Provisioning creates or reuses the global user identity by normalized mobile number, creates a `TEACHER` membership in the acting admin's school, and issues a one-time activation invitation. Invitation state (`PENDING`, `REVOKED`, `CONSUMED`, plus a derived `EXPIRED`) is stored on `teacher_invitations` and is deliberately **not** folded into `school_memberships.status`, which keeps meaning school access (`ACTIVE`/`SUSPENDED`/`REVOKED`). The account is created with a verified mobile number and **no credential account**, and activation is the only path that links one.
 

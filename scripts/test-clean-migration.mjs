@@ -49,17 +49,38 @@ try {
       to_regclass('public.session') as auth_session,
       to_regclass('public.schools') as schools,
       to_regclass('public.school_memberships') as memberships,
+      to_regclass('public.school_settings') as school_settings,
       to_regclass('public.academic_years') as academic_years,
       to_regclass('public.classrooms') as classrooms,
+      to_regclass('public.class_teachers') as class_teachers,
       to_regclass('public.students') as students,
       to_regclass('public.guardians') as guardians,
       to_regclass('public.student_guardians') as student_guardians,
-      to_regclass('public.enrollments') as enrollments
+      to_regclass('public.enrollments') as enrollments,
+      to_regclass('public.attendance_sessions') as attendance_sessions,
+      to_regclass('public.attendance_records') as attendance_records,
+      to_regclass('public.notification_outbox') as notification_outbox,
+      to_regclass('public.audit_logs') as audit_logs,
+      to_regclass('public.teacher_profiles') as teacher_profiles,
+      to_regclass('public.teacher_registrations') as teacher_registrations,
+      to_regclass('public.otp_challenges') as otp_challenges
     `);
   const constraints = await migrated.query(`
     select conname from pg_constraint
     where conrelid = 'public.enrollments'::regclass
       and conname = 'enrollments_no_student_year_overlap'
+  `);
+  // A migration can apply "successfully" and still leave an object missing, so the
+  // removed table is asserted absent as well as the new one present.
+  const dropped = await migrated.query(`
+    select to_regclass('public.teacher_invitations') as teacher_invitations
+  `);
+  // The approval states must exist as enum values, or every teacher insert fails.
+  const enumValues = await migrated.query(`
+    select unnest(enum_range(null::public.membership_status))::text as value
+  `);
+  const otpValues = await migrated.query(`
+    select unnest(enum_range(null::public.otp_purpose))::text as value
   `);
   await migrated.end();
 
@@ -69,6 +90,19 @@ try {
   }
   if (constraints.rows.length !== 1) {
     throw new Error("Clean migration omitted enrollment overlap constraint.");
+  }
+  if (dropped.rows[0].teacher_invitations !== null) {
+    throw new Error("Clean migration did not drop teacher_invitations.");
+  }
+  const membershipValues = new Set(enumValues.rows.map((row) => row.value));
+  for (const required of ["ACTIVE", "SUSPENDED", "REVOKED", "PENDING_ADMIN_APPROVAL", "REJECTED"]) {
+    if (!membershipValues.has(required)) {
+      throw new Error(`Clean migration omitted membership_status value: ${required}`);
+    }
+  }
+  const purposeValues = new Set(otpValues.rows.map((row) => row.value));
+  if (!purposeValues.has("TEACHER_REGISTRATION")) {
+    throw new Error("Clean migration omitted otp_purpose value: TEACHER_REGISTRATION");
   }
 
   console.log(`Clean migration passed in database ${temporaryDatabase}.`);

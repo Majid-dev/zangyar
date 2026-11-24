@@ -1,37 +1,58 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
 
 import type { ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getDb } from "@/lib/db";
-import { accounts, schoolMemberships, schools, teacherInvitations, teacherProfiles, users } from "@/lib/db/schema";
+import { schoolMemberships, teacherProfiles, teacherRegistrations, users } from "@/lib/db/schema";
 import { toAsciiDigits } from "@/lib/digits";
-import { maskIranianMobile } from "@/lib/mobile";
 
 import { requireTeacherManagementAccess } from "./policy";
 import { teacherListFilterSchema, type TeacherListFilter } from "./schema";
-import { hashInvitationToken } from "./tokens";
 import {
-  deriveTeacherAccountStatus,
-  effectiveInvitationStatus,
-  type EffectiveInvitationStatus,
+  deriveTeacherDisplayStatus,
+  teacherRejectionAction,
+  teacherStatusAction,
   type MembershipStatus,
-  type TeacherAccountStatus,
+  type TeacherDisplayStatus,
+  type TeacherStatusAction,
 } from "./status";
 
+/**
+ * A teacher row is anchored on the registration — the authorized mobile number —
+ * because that exists before any account does. The person's name and their
+ * membership appear once they have registered.
+ */
 export type TeacherListRow = {
-  teacherId: string;
-  membershipId: string;
-  userId: string;
-  firstName: string;
-  lastName: string;
-  mobile: string | null;
+  registrationId: string;
+  phoneNumber: string;
   personnelCode: string | null;
-  membershipStatus: MembershipStatus;
-  invitationStatus: EffectiveInvitationStatus;
-  accountStatus: TeacherAccountStatus;
-  invitationExpiresAt: Date | null;
-  activatedAt: Date | null;
+  registrationStatus: "PENDING" | "CLAIMED" | "REVOKED";
+  membershipStatus: MembershipStatus | null;
+  displayStatus: TeacherDisplayStatus;
+  /**
+   * The one status move available for this teacher, or null before they register.
+   * Derived server-side so the table and the detail page cannot disagree about
+   * what is allowed, and so the client never decides an authorization question.
+   */
+  statusAction: TeacherStatusAction | null;
+  /** The rejection move, offered alongside approval while a decision is pending. */
+  rejectionAction: TeacherStatusAction | null;
+  firstName: string | null;
+  lastName: string | null;
+  /** Whether the authorized number may still be corrected. */
+  canEditMobile: boolean;
+  /**
+   * Whether the registration may be deleted outright.
+   *
+   * Wider than `canEditMobile` on purpose: a number withdrawn under the old model
+   * (a legacy `REVOKED` row) is still nobody's, so an admin can clear it away, but
+   * it is no longer an invitation and so is not open to correction.
+   */
+  canDeleteRegistration: boolean;
+  /** From `users.phoneNumberVerified`; null before the person registers. */
+  mobileVerified: boolean | null;
+  registeredAt: Date | null;
 };
 
 export type TeacherListResult = {
@@ -42,65 +63,99 @@ export type TeacherListResult = {
 };
 
 export type TeacherDetail = TeacherListRow & {
-  /** Masked for display; the full number is only ever the row's own identity. */
-  maskedMobile: string | null;
   createdAt: Date;
 };
 
-export type TeacherInvitationRow = {
-  id: string;
-  status: EffectiveInvitationStatus;
-  createdAt: Date;
-  expiresAt: Date;
-  consumedAt: Date | null;
-  revokedAt: Date | null;
+/** The columns every teacher read selects, so list and detail cannot drift apart. */
+const teacherSelection = {
+  registrationId: teacherRegistrations.id,
+  phoneNumber: teacherRegistrations.phoneNumber,
+  // From the profile, not the registration: the personnel code is the teacher's own
+  // employment detail, so it exists only once they have registered (ADR-028).
+  personnelCode: teacherProfiles.personnelCode,
+  registrationStatus: teacherRegistrations.status,
+  membershipStatus: schoolMemberships.status,
+  firstName: teacherProfiles.firstName,
+  lastName: teacherProfiles.lastName,
+  mobileVerified: users.phoneNumberVerified,
+  registeredAt: teacherRegistrations.claimedAt,
+  createdAt: teacherRegistrations.createdAt,
 };
+
+type TeacherSelectionRow = {
+  registrationId: string;
+  phoneNumber: string;
+  personnelCode: string | null;
+  registrationStatus: "PENDING" | "CLAIMED" | "REVOKED";
+  membershipStatus: MembershipStatus | null;
+  firstName: string | null;
+  lastName: string | null;
+  mobileVerified: boolean | null;
+  registeredAt: Date | null;
+};
+
+function toRow(row: TeacherSelectionRow): TeacherListRow {
+  return {
+    registrationId: row.registrationId,
+    phoneNumber: row.phoneNumber,
+    personnelCode: row.personnelCode,
+    registrationStatus: row.registrationStatus,
+    membershipStatus: row.membershipStatus,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    mobileVerified: row.mobileVerified,
+    registeredAt: row.registeredAt,
+    displayStatus: deriveTeacherDisplayStatus({
+      registrationStatus: row.registrationStatus,
+      membershipStatus: row.membershipStatus,
+    }),
+    statusAction: teacherStatusAction(row.membershipStatus),
+    rejectionAction: teacherRejectionAction(row.membershipStatus),
+    // The number is the login identity once claimed, so it is only the admin's to
+    // correct while nobody owns it.
+    canEditMobile: row.registrationStatus === "PENDING",
+    canDeleteRegistration: row.registrationStatus !== "CLAIMED",
+  };
+}
 
 /**
- * The most recent invitation per membership.
+ * Translates a derived display status into the stored conditions that produce it.
  *
- * `selectDistinctOn` with a matching leading `orderBy` is the same idiom the
- * student list uses for its effective enrollment: it keeps one row per key
- * without a correlated subquery.
+ * The status is computed rather than stored, so each filter value is expressed as
+ * the membership/registration combination behind it instead of a column compare.
  */
-function latestInvitationPerMembership(schoolId: string) {
-  return getDb()
-    .selectDistinctOn([teacherInvitations.membershipId], {
-      membershipId: teacherInvitations.membershipId,
-      id: teacherInvitations.id,
-      status: teacherInvitations.status,
-      expiresAt: teacherInvitations.expiresAt,
-      consumedAt: teacherInvitations.consumedAt,
-    })
-    .from(teacherInvitations)
-    .where(eq(teacherInvitations.schoolId, schoolId))
-    .orderBy(asc(teacherInvitations.membershipId), desc(teacherInvitations.createdAt))
-    .as("latest_invitation");
+function statusCondition(status: TeacherDisplayStatus) {
+  switch (status) {
+    case "PENDING_REGISTRATION":
+      return sql`${teacherRegistrations.membershipId} is null and ${teacherRegistrations.status} = 'PENDING'`;
+    case "PENDING_ADMIN_APPROVAL":
+      return sql`${schoolMemberships.status} = 'PENDING_ADMIN_APPROVAL'`;
+    case "ACTIVE":
+      return sql`${schoolMemberships.status} = 'ACTIVE'`;
+    case "REJECTED":
+      return sql`${schoolMemberships.status} = 'REJECTED'`;
+    case "DEACTIVATED":
+      return sql`(${schoolMemberships.status} in ('SUSPENDED','REVOKED') or ${teacherRegistrations.status} = 'REVOKED')`;
+    default:
+      return sql`true`;
+  }
 }
 
-/** The credential account, present only after the teacher completed activation. */
-function credentialAccount() {
-  return getDb()
-    .select({ userId: accounts.userId, createdAt: accounts.createdAt })
-    .from(accounts)
-    .where(eq(accounts.providerId, "credential"))
-    .as("credential_account");
-}
-
-function orderFor(sort: TeacherListFilter["sort"], dir: TeacherListFilter["dir"], profile: typeof teacherProfiles) {
+function orderFor(sort: TeacherListFilter["sort"], dir: TeacherListFilter["dir"]) {
   const direction = dir === "desc" ? desc : asc;
   switch (sort) {
     case "mobile":
-      return [direction(users.phoneNumber), asc(profile.lastName)];
+      return [direction(teacherRegistrations.phoneNumber)];
     case "status":
-      return [direction(schoolMemberships.status), asc(profile.lastName)];
+      return [direction(teacherRegistrations.status), asc(teacherRegistrations.phoneNumber)];
+    case "verification":
+      // An unregistered row has no verification state; it sorts last either way.
+      return [direction(users.phoneNumberVerified), asc(teacherRegistrations.phoneNumber)];
     case "personnel":
-      // Nulls last in both directions, so unset codes do not lead the list.
-      return [direction(profile.personnelCode), asc(profile.lastName)];
-    // Both remaining sorts are name-based; the invitation axis is filtered rather
-    // than ordered because it is derived from a joined row.
+      return [direction(teacherProfiles.personnelCode), asc(teacherRegistrations.phoneNumber)];
+    // Names exist only after registration, so a name sort falls back to the number.
     default:
-      return [direction(profile.lastName), direction(profile.firstName)];
+      return [direction(teacherProfiles.lastName), direction(teacherProfiles.firstName), asc(teacherRegistrations.phoneNumber)];
   }
 }
 
@@ -114,275 +169,68 @@ export async function listTeachersForContext(
   filters: TeacherListFilter,
 ): Promise<TeacherListResult> {
   const db = getDb();
-  const latestInvitation = latestInvitationPerMembership(context.schoolId);
-  const credential = credentialAccount();
-  const now = new Date();
 
   const namePattern = filters.name ? `%${filters.name}%` : undefined;
-  // A pasted number may carry Persian digits or separators; normalize to the
-  // stored canonical spelling before matching.
+  // A pasted number may carry Persian digits or separators; normalize to the stored
+  // canonical spelling before matching.
   const mobilePattern = filters.mobile ? `%${toAsciiDigits(filters.mobile).replace(/[\s\-()]/g, "")}%` : undefined;
-  // Personnel codes are typed in either digit script, so the term is converted the
-  // same way a mobile number is.
   const personnelPattern = filters.personnelCode ? `%${toAsciiDigits(filters.personnelCode)}%` : undefined;
 
-  const invitationStatus = filters.invitationStatus;
-  const invitationCondition: SQL | undefined = invitationStatus
-    ? invitationStatus === "NONE"
-      ? sql`${latestInvitation.id} is null`
-      : invitationStatus === "EXPIRED"
-        ? sql`${latestInvitation.status} = 'PENDING' and ${latestInvitation.expiresAt} <= ${now}`
-        : invitationStatus === "PENDING"
-          ? sql`${latestInvitation.status} = 'PENDING' and ${latestInvitation.expiresAt} > ${now}`
-          : sql`${latestInvitation.status} = ${invitationStatus}`
-    : undefined;
-
   const conditions = and(
-    eq(schoolMemberships.schoolId, context.schoolId),
-    eq(schoolMemberships.role, "TEACHER"),
-    filters.membershipStatus ? eq(schoolMemberships.status, filters.membershipStatus) : undefined,
+    eq(teacherRegistrations.schoolId, context.schoolId),
     namePattern
-      ? or(
-          ilike(users.name, namePattern),
-          ilike(teacherProfiles.firstName, namePattern),
-          ilike(teacherProfiles.lastName, namePattern),
-        )
+      ? or(ilike(teacherProfiles.firstName, namePattern), ilike(teacherProfiles.lastName, namePattern))
       : undefined,
-    mobilePattern ? ilike(users.phoneNumber, mobilePattern) : undefined,
+    mobilePattern ? ilike(teacherRegistrations.phoneNumber, mobilePattern) : undefined,
     personnelPattern ? ilike(teacherProfiles.personnelCode, personnelPattern) : undefined,
-    invitationCondition,
+    filters.status ? statusCondition(filters.status) : undefined,
   );
 
   const [rows, [totalRow]] = await Promise.all([
     db
-      .select({
-        teacherId: teacherProfiles.id,
-        membershipId: schoolMemberships.id,
-        userId: schoolMemberships.userId,
-        firstName: teacherProfiles.firstName,
-        lastName: teacherProfiles.lastName,
-        mobile: users.phoneNumber,
-        personnelCode: teacherProfiles.personnelCode,
-        membershipStatus: schoolMemberships.status,
-        invitationStatus: latestInvitation.status,
-        invitationExpiresAt: latestInvitation.expiresAt,
-        activatedAt: credential.createdAt,
-        createdAt: teacherProfiles.createdAt,
-      })
-      .from(schoolMemberships)
-      .innerJoin(teacherProfiles, eq(teacherProfiles.membershipId, schoolMemberships.id))
-      .innerJoin(users, eq(users.id, schoolMemberships.userId))
-      .leftJoin(latestInvitation, eq(latestInvitation.membershipId, schoolMemberships.id))
-      .leftJoin(credential, eq(credential.userId, schoolMemberships.userId))
+      .select(teacherSelection)
+      .from(teacherRegistrations)
+      .leftJoin(schoolMemberships, eq(schoolMemberships.id, teacherRegistrations.membershipId))
+      .leftJoin(teacherProfiles, eq(teacherProfiles.membershipId, schoolMemberships.id))
+      .leftJoin(users, eq(users.id, schoolMemberships.userId))
       .where(conditions)
-      .orderBy(...orderFor(filters.sort, filters.dir, teacherProfiles), asc(schoolMemberships.id))
+      .orderBy(...orderFor(filters.sort, filters.dir))
       .limit(filters.pageSize)
       .offset((filters.page - 1) * filters.pageSize),
     db
       .select({ value: count() })
-      .from(schoolMemberships)
-      .innerJoin(teacherProfiles, eq(teacherProfiles.membershipId, schoolMemberships.id))
-      .innerJoin(users, eq(users.id, schoolMemberships.userId))
-      .leftJoin(latestInvitation, eq(latestInvitation.membershipId, schoolMemberships.id))
+      .from(teacherRegistrations)
+      .leftJoin(schoolMemberships, eq(schoolMemberships.id, teacherRegistrations.membershipId))
+      .leftJoin(teacherProfiles, eq(teacherProfiles.membershipId, schoolMemberships.id))
       .where(conditions),
   ]);
 
   return {
-    rows: rows.map((row) => ({
-      ...row,
-      invitationStatus: effectiveInvitationStatus(
-        row.invitationStatus ? { status: row.invitationStatus, expiresAt: row.invitationExpiresAt! } : null,
-        now,
-      ),
-      accountStatus: deriveTeacherAccountStatus(
-        row.membershipStatus,
-        row.invitationStatus ? { status: row.invitationStatus, expiresAt: row.invitationExpiresAt! } : null,
-        now,
-      ),
-    })),
+    rows: rows.map(toRow),
     total: totalRow?.value ?? 0,
     page: filters.page,
     pageSize: filters.pageSize,
   };
 }
 
+/** Loads one registration, anchored on the verified school. */
 export async function getTeacherForContext(
   context: ActiveSchoolMembership,
-  teacherId: string,
+  registrationId: string,
 ): Promise<TeacherDetail | null> {
-  const db = getDb();
-  const latestInvitation = latestInvitationPerMembership(context.schoolId);
-  const credential = credentialAccount();
-  const now = new Date();
-
-  const [row] = await db
-    .select({
-      teacherId: teacherProfiles.id,
-      membershipId: schoolMemberships.id,
-      userId: schoolMemberships.userId,
-      firstName: teacherProfiles.firstName,
-      lastName: teacherProfiles.lastName,
-      mobile: users.phoneNumber,
-      personnelCode: teacherProfiles.personnelCode,
-      membershipStatus: schoolMemberships.status,
-      invitationStatus: latestInvitation.status,
-      invitationExpiresAt: latestInvitation.expiresAt,
-      activatedAt: credential.createdAt,
-      createdAt: teacherProfiles.createdAt,
-    })
-    .from(schoolMemberships)
-    .innerJoin(teacherProfiles, eq(teacherProfiles.membershipId, schoolMemberships.id))
-    .innerJoin(users, eq(users.id, schoolMemberships.userId))
-    .leftJoin(latestInvitation, eq(latestInvitation.membershipId, schoolMemberships.id))
-    .leftJoin(credential, eq(credential.userId, schoolMemberships.userId))
+  const [row] = await getDb()
+    .select(teacherSelection)
+    .from(teacherRegistrations)
+    .leftJoin(schoolMemberships, eq(schoolMemberships.id, teacherRegistrations.membershipId))
+    .leftJoin(teacherProfiles, eq(teacherProfiles.membershipId, schoolMemberships.id))
+    .leftJoin(users, eq(users.id, schoolMemberships.userId))
     .where(and(
-      eq(teacherProfiles.id, teacherId),
-      eq(schoolMemberships.schoolId, context.schoolId),
-      eq(schoolMemberships.role, "TEACHER"),
+      eq(teacherRegistrations.id, registrationId),
+      eq(teacherRegistrations.schoolId, context.schoolId),
     ))
     .limit(1);
 
   if (!row) return null;
 
-  const invitation = row.invitationStatus
-    ? { status: row.invitationStatus, expiresAt: row.invitationExpiresAt! }
-    : null;
-
-  return {
-    ...row,
-    maskedMobile: maskIranianMobile(row.mobile),
-    invitationStatus: effectiveInvitationStatus(invitation, now),
-    accountStatus: deriveTeacherAccountStatus(row.membershipStatus, invitation, now),
-  };
-}
-
-export async function getTeacherForContextOrThrow(context: ActiveSchoolMembership, teacherId: string) {
-  const teacher = await getTeacherForContext(context, teacherId);
-  if (!teacher) throw new Error("Teacher not found.");
-  return teacher;
-}
-
-/**
- * Resolves the mobile an activation token belongs to, for issuing a code.
- *
- * Server-only by intent: the raw number is returned here and nowhere else, so the
- * browser never learns it. The OTP step is addressed by the token server-side,
- * which is why the activation form has no mobile field at all.
- */
-export async function resolveActivationOtpTarget(token: string) {
-  const db = getDb();
-  const [row] = await db
-    .select({
-      mobile: users.phoneNumber,
-      schoolId: schoolMemberships.schoolId,
-      membershipId: schoolMemberships.id,
-      schoolName: schools.name,
-      invitationStatus: teacherInvitations.status,
-      invitationExpiresAt: teacherInvitations.expiresAt,
-      membershipStatus: schoolMemberships.status,
-    })
-    .from(teacherInvitations)
-    .innerJoin(schoolMemberships, eq(schoolMemberships.id, teacherInvitations.membershipId))
-    .innerJoin(users, eq(users.id, schoolMemberships.userId))
-    .innerJoin(schools, eq(schools.id, teacherInvitations.schoolId))
-    .where(and(
-      eq(teacherInvitations.tokenHash, hashInvitationToken(token)),
-      eq(schoolMemberships.schoolId, teacherInvitations.schoolId),
-    ))
-    .limit(1);
-
-  if (!row) return null;
-
-  const status = effectiveInvitationStatus({ status: row.invitationStatus, expiresAt: row.invitationExpiresAt });
-  if (status !== "PENDING" || row.membershipStatus !== "ACTIVE") return null;
-  if (!row.mobile) return null;
-
-  return {
-    mobile: row.mobile,
-    schoolId: row.schoolId,
-    membershipId: row.membershipId,
-    schoolName: row.schoolName,
-  };
-}
-
-export async function listTeacherInvitationsForContext(
-  context: ActiveSchoolMembership,
-  teacherId: string,
-): Promise<TeacherInvitationRow[]> {
-  const db = getDb();
-  const now = new Date();
-
-  const rows = await db
-    .select({
-      id: teacherInvitations.id,
-      status: teacherInvitations.status,
-      createdAt: teacherInvitations.createdAt,
-      expiresAt: teacherInvitations.expiresAt,
-      consumedAt: teacherInvitations.consumedAt,
-      revokedAt: teacherInvitations.revokedAt,
-    })
-    .from(teacherInvitations)
-    .innerJoin(teacherProfiles, eq(teacherProfiles.membershipId, teacherInvitations.membershipId))
-    .where(and(
-      eq(teacherProfiles.id, teacherId),
-      eq(teacherInvitations.schoolId, context.schoolId),
-    ))
-    .orderBy(desc(teacherInvitations.createdAt));
-
-  return rows.map((row) => ({
-    ...row,
-    status: effectiveInvitationStatus({ status: row.status, expiresAt: row.expiresAt }, now),
-  }));
-}
-
-/**
- * Activation-link preview for the public activation page.
- *
- * Returns display-only values: the teacher's name and the school they are
- * joining. It exposes nothing about other tenants, and a caller learns only
- * whether the link is still usable.
- */
-export async function resolveActivationToken(token: string) {
-  const db = getDb();
-  const now = new Date();
-
-  const [row] = await db
-    .select({
-      status: teacherInvitations.status,
-      expiresAt: teacherInvitations.expiresAt,
-      firstName: teacherProfiles.firstName,
-      lastName: teacherProfiles.lastName,
-      membershipStatus: schoolMemberships.status,
-      membershipId: schoolMemberships.id,
-      schoolId: schoolMemberships.schoolId,
-      schoolName: schools.name,
-      mobile: users.phoneNumber,
-    })
-    .from(teacherInvitations)
-    .innerJoin(schoolMemberships, eq(schoolMemberships.id, teacherInvitations.membershipId))
-    .innerJoin(teacherProfiles, eq(teacherProfiles.membershipId, teacherInvitations.membershipId))
-    .innerJoin(schools, eq(schools.id, teacherInvitations.schoolId))
-    .innerJoin(users, eq(users.id, schoolMemberships.userId))
-    .where(and(
-      eq(teacherInvitations.tokenHash, hashInvitationToken(token)),
-      eq(schoolMemberships.schoolId, teacherInvitations.schoolId),
-    ))
-    .limit(1);
-
-  if (!row) return null;
-
-  const status = effectiveInvitationStatus({ status: row.status, expiresAt: row.expiresAt }, now);
-
-  return {
-    teacherName: `${row.firstName} ${row.lastName}`,
-    // Only the school the invitation belongs to: the page must not reveal any
-    // other tenant the person might also belong to.
-    schoolName: row.schoolName,
-    // Masked for display, and only for this invitation's own record. The full
-    // number is never sent to the browser: the OTP step is addressed by the token
-    // server-side, so the client never needs to know it.
-    maskedMobile: maskIranianMobile(row.mobile),
-    usable: status === "PENDING" && row.membershipStatus === "ACTIVE",
-    status,
-  };
+  return { ...toRow(row), createdAt: row.createdAt };
 }

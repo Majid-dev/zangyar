@@ -85,6 +85,13 @@ export default async function LoginPage() {
                 بازیابی گذرواژه
               </Link>
             </p>
+            <p className="mt-1 text-xs leading-6 text-muted">
+              حساب ندارید؟ اگر مدیر مدرسه شماره‌ی شما را ثبت کرده باشد، می‌توانید{" "}
+              <Link href="/register" className="font-bold text-secondary hover:text-primary">
+                ثبت‌نام کنید
+              </Link>
+              .
+            </p>
           </div>
 
           <LoginForm />

@@ -68,13 +68,19 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "An activated teacher cannot be invited again.": "این دبیر حساب خود را فعال کرده و نمی‌توان دوباره برای او دعوت فرستاد.",
   "Personnel code is already in use at this school.": "این کد پرسنلی در این مدرسه قبلاً استفاده شده است.",
   "School membership is not active.": "عضویت این کاربر در مدرسه فعال نیست.",
-  "The teacher name cannot be empty.": "نام دبیر نمی‌تواند خالی باشد.",
-  "There is no pending invitation for this teacher.": "دعوت در انتظاری برای این دبیر وجود ندارد.",
-  "This activation link is invalid or has expired.": "این پیوند فعال‌سازی معتبر نیست یا منقضی شده است.",
-  "This mobile number belongs to an account that cannot be activated.": "این شماره همراه به حسابی تعلق دارد که قابل فعال‌سازی نیست.",
-  "This mobile number belongs to an account with a different role at this school.": "این شماره همراه به حسابی با نقش دیگری در این مدرسه تعلق دارد.",
-  "This teacher account is already activated.": "حساب این دبیر قبلاً فعال شده است.",
-  "Teacher not found.": "دبیر پیدا نشد.",
+  // Teacher registration
+  "A registered teacher cannot be deleted here. Deactivate them instead.": "دبیری که ثبت‌نام کرده را نمی‌توان حذف کرد؛ به‌جای آن دسترسی او را غیرفعال کنید.",
+  "A registered teacher's mobile number cannot be changed here.": "شماره همراه دبیری که ثبت‌نام کرده از این‌جا قابل تغییر نیست.",
+  "No school has authorized this mobile number.": "هیچ مدرسه‌ای این شماره همراه را مجاز نکرده است.",
+  "Registration could not be completed.": "تکمیل ثبت‌نام انجام نشد.",
+  "This mobile number is already registered at this school.": "این شماره همراه قبلاً برای این مدرسه ثبت شده است.",
+  "This person already belongs to this school.": "این شخص از قبل عضو این مدرسه است.",
+  "This registration can no longer be changed.": "این ثبت دیگر قابل تغییر نیست؛ می‌توانید آن را حذف کنید.",
+  "This registration changed while it was being deleted.": "وضعیت این ثبت همزمان تغییر کرد و حذف انجام نشد. صفحه را دوباره بارگذاری کنید.",
+  "This teacher has not registered yet.": "این دبیر هنوز ثبت‌نام نکرده است.",
+  "Teacher status changed concurrently. Reload the page and try again.": "وضعیت این دبیر همزمان تغییر کرده است. صفحه را دوباره بارگذاری کنید.",
+  "This is already the registered mobile number.": "این همان شماره همراه ثبت‌شده است.",
+  "Teacher registration not found.": "ثبت‌نام دبیر پیدا نشد.",
   "Teacher profile not found.": "پرونده‌ی دبیر پیدا نشد.",
   "Training or configuration data is invalid.": "اطلاعات واردشده معتبر نیست.",
 };
@@ -84,6 +90,7 @@ const TRUNCATION = 300;
 function transitionMessage(raw: string) {
   if (raw.startsWith("Invalid academic year transition")) return "این تغییر وضعیت برای سال تحصیلی مجاز نیست.";
   if (raw.startsWith("Invalid school status transition")) return "این تغییر وضعیت برای مدرسه مجاز نیست.";
+  if (raw.startsWith("Invalid teacher status transition")) return "این تغییر وضعیت برای دبیر مجاز نیست. صفحه را دوباره بارگذاری کنید.";
   return null;
 }
 

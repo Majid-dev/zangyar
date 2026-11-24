@@ -70,7 +70,7 @@ server log, not to the browser** — watch the `corepack pnpm dev` terminal for 
 line like:
 
 ```text
-[otp:development] purpose=TEACHER_ACTIVATION mobile=0912***789 school="..." code=123456 expiresIn=120s
+[otp:development] purpose=TEACHER_REGISTRATION mobile=0912***789 school="..." code=123456 expiresIn=120s
 ```
 
 The default code is `123456`. Override it with `OTP_DEV_FIXED_CODE`. Tune the
@@ -89,25 +89,31 @@ product's OTP surface is `/otp/*`.
 
 Sign in as the School Admin and open **دبیران** (`/teachers`).
 
-1. **افزودن دبیر** (`/teachers/new`) asks for a first name, last name, and mobile
-   number, plus an optional personnel code. Persian digits, `+98`, and `0098`
-   spellings are all accepted and normalized to `09XXXXXXXXX`.
-2. Submitting creates the account, the `TEACHER` membership, and a one-time
-   activation invitation. The form then shows the activation link, which is the
-   only time it is visible: only the token's hash is stored, so the admin must copy
-   the link and pass it to the teacher through whatever channel they already use.
-   There is no SMS or email delivery yet.
-3. The teacher opens the link, requests a verification code, and — once it appears
-   in the server log — submits that code together with a password of their own.
-   Until then the account exists but **cannot** sign in, because no credential is
-   linked.
-4. The teacher detail page (`/teachers/[id]`) shows the invitation status, resends
-   or revokes an invitation, edits basic information, and deactivates or
-   reactivates the teacher. Resending invalidates the previous link.
+1. **افزودن شماره همراه** (`/teachers/new`) asks for a mobile number only — no
+   name, no personnel code. Persian digits, `+98`, and `0098` spellings are all
+   accepted and normalized to `09XXXXXXXXX`. After a successful submit, **افزودن
+   شماره دیگر** returns a fresh form for the next number.
+2. Submitting only *authorizes the number*: no account, no membership, and nothing
+   is sent. There is no invitation link, because there is nothing to send and no
+   SMS provider. The admin's registration of the number is the invitation.
+3. The teacher goes to **ثبت‌نام** (`/register`) — linked from the login page —
+   enters that number, receives a code (read it from the server log, below),
+   proves it, and supplies their own name, optional personnel code, and password.
+4. Their registration lands in **در انتظار تأیید مدیر**. They can sign in, but reach
+   no school resource until the admin approves.
+5. The teacher detail page (`/teachers/[id]`) shows the number, the details the
+   teacher supplied, and the verification state. The access decision — approve,
+   reject, deactivate, or reactivate — is the same control here and in the
+   teachers table, since both render the actions the transition matrix derives
+   for the teacher's current status. Before the teacher registers, both offer to
+   correct or delete the number instead.
 
-Activation links expire after `TEACHER_INVITATION_TTL_HOURS` (default 72), and
-verification codes after `OTP_TTL_SECONDS` (default 120). A School Admin can never
-set a teacher's password or change a teacher's role.
+Registration codes expire after `OTP_TTL_SECONDS` (default 120). A School Admin
+never sets a teacher's password and cannot change a teacher's role. The personnel
+code is the teacher's own detail: they supply it (optionally) at registration, and
+an admin can only correct it afterwards. A mobile number may be authorized once per
+school; deleting an unclaimed authorization frees the number to be re-added, while a
+claimed one can no longer be corrected or deleted and ends through deactivation.
 
 ## Signing in with a one-time code
 
@@ -136,7 +142,7 @@ never touch local development data:
 ```bash
 corepack pnpm db:test-clean            # migrations apply cleanly to an empty database
 corepack pnpm test:integration:auth    # auth, demo seed, and tenant isolation
-corepack pnpm test:integration:teachers # teacher provisioning and invitation lifecycle
+corepack pnpm test:integration:teachers # teacher registration, approval, and tenant isolation
 corepack pnpm test:integration:otp     # OTP issuance, verification, and the production gate
 corepack pnpm test:integration:phase4
 corepack pnpm test:integration:phase5

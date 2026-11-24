@@ -10,27 +10,15 @@ import { Panel } from "@/components/ui/panel";
 import { formatPersianDateShort } from "@/lib/date";
 
 import type { TeacherListRow } from "../queries";
-import { INVITATION_STATUS_LABELS } from "../status";
+import { TEACHER_DISPLAY_STATUS_LABELS, TEACHER_DISPLAY_STATUS_TONES } from "../status";
+import { TeacherRowActions } from "./teacher-row-actions";
 
-type SortField = "name" | "mobile" | "status" | "invitation" | "personnel";
+type SortField = "name" | "mobile" | "status" | "verification" | "personnel";
 type Direction = "asc" | "desc";
 
-const MEMBERSHIP_STATUS_LABELS: Record<"ACTIVE" | "SUSPENDED" | "REVOKED", string> = {
-  ACTIVE: "فعال",
-  SUSPENDED: "غیرفعال",
-  REVOKED: "لغو‌شده",
-};
-
-const MEMBERSHIP_STATUS_TONES: Record<"ACTIVE" | "SUSPENDED" | "REVOKED", "success" | "neutral" | "danger"> = {
-  ACTIVE: "success",
-  SUSPENDED: "neutral",
-  REVOKED: "danger",
-};
-
 /**
- * Digits are rendered in Persian and grouped as `0912 345 6789`, but the value is
- * kept `dir="ltr"` and only the runs are Persian, so the number reads left-to-right
- * the way a phone number does while still matching the surrounding script.
+ * Digits render in Persian and group as `0912 345 6789`, while the value stays
+ * `dir="ltr"` so the number reads left-to-right the way a phone number does.
  */
 function formatMobileForDisplay(mobile: string | null) {
   if (!mobile) return null;
@@ -42,6 +30,18 @@ function toPersianDigits(value: string) {
   return value.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
 }
 
+const VERIFICATION_LABELS: Record<string, string> = {
+  true: "تأییدشده",
+  false: "تأییدنشده",
+  none: "—",
+};
+
+const VERIFICATION_TONES: Record<string, "success" | "warning" | "neutral"> = {
+  true: "success",
+  false: "warning",
+  none: "neutral",
+};
+
 type TeacherTableProps = {
   rows: TeacherListRow[];
   total: number;
@@ -50,8 +50,7 @@ type TeacherTableProps = {
   name?: string;
   mobile?: string;
   personnelCode?: string;
-  membershipStatus?: string;
-  invitationStatus?: string;
+  status?: string;
   sort?: SortField;
   dir?: Direction;
 };
@@ -59,11 +58,10 @@ type TeacherTableProps = {
 /**
  * Teachers data table.
  *
- * Each column owns the filter for the field it shows, and every control writes to
- * the URL, so filtering is a soft navigation, is shareable, and always returns to
- * the first page. Account state and invitation state are shown as separate axes
- * because they mean different things: one is school access, the other is whether
- * the teacher ever finished activating.
+ * A row is anchored on the authorized mobile number, so it exists before the
+ * person registers; the name and status fill in once they do. Each column owns the
+ * filter for the field it shows, and every control writes to the URL, so filtering
+ * is a soft navigation, is shareable, and always returns to the first page.
  */
 export function TeacherTable({
   rows,
@@ -73,8 +71,7 @@ export function TeacherTable({
   name = "",
   mobile = "",
   personnelCode = "",
-  membershipStatus,
-  invitationStatus,
+  status,
   sort = "name",
   dir = "asc",
 }: TeacherTableProps) {
@@ -112,13 +109,13 @@ export function TeacherTable({
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted" aria-live="polite">{total} دبیر</span>
-          <Link href="/teachers/new" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-primary px-3 text-xs font-bold text-white transition hover:bg-primary/90">افزودن دبیر</Link>
+          <Link href="/teachers/new" className="inline-flex min-h-9 items-center justify-center rounded-xl bg-primary px-3 text-xs font-bold text-white transition hover:bg-primary/90">افزودن شماره همراه</Link>
         </div>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[880px] text-start text-sm" dir="rtl">
-          <caption className="sr-only">فهرست دبیران مدرسه، وضعیت حساب و وضعیت دعوت</caption>
+          <caption className="sr-only">فهرست شماره‌های همراه ثبت‌شده، وضعیت ثبت‌نام و تأیید شماره</caption>
           <thead className="bg-sage/50 text-xs text-muted">
             <tr>
               <HeaderCell label="دبیر" sortField="name" sort={sort} dir={dir} onSort={sortBy}>
@@ -130,56 +127,60 @@ export function TeacherTable({
               <HeaderCell label="کد پرسنلی" sortField="personnel" sort={sort} dir={dir} onSort={sortBy} align="end">
                 <TextFilter label="کد پرسنلی" placeholder="کد" value={personnelCode} onSubmit={(value) => updateParams({ personnelCode: value || null })} dir="ltr" />
               </HeaderCell>
-              <HeaderCell label="دسترسی به مدرسه" sortField="status" sort={sort} dir={dir} onSort={sortBy}>
-                <Select aria-label="فیلتر وضعیت دسترسی" value={membershipStatus ?? ""} onChange={(event) => updateParams({ membershipStatus: event.target.value || null })} className="min-h-8 px-2 text-xs">
+              <HeaderCell label="وضعیت" sortField="status" sort={sort} dir={dir} onSort={sortBy}>
+                <Select aria-label="فیلتر وضعیت" value={status ?? ""} onChange={(event) => updateParams({ status: event.target.value || null })} className="min-h-8 px-2 text-xs">
                   <option value="">همه وضعیت‌ها</option>
+                  <option value="PENDING_REGISTRATION">در انتظار ثبت‌نام</option>
+                  <option value="PENDING_ADMIN_APPROVAL">در انتظار تأیید مدیر</option>
                   <option value="ACTIVE">فعال</option>
-                  <option value="SUSPENDED">غیرفعال</option>
-                  <option value="REVOKED">لغو‌شده</option>
+                  <option value="REJECTED">رد‌شده</option>
+                  <option value="DEACTIVATED">غیرفعال</option>
                 </Select>
               </HeaderCell>
-              <HeaderCell label="وضعیت دعوت" sortField="invitation" sort={sort} dir={dir} onSort={sortBy}>
-                <Select aria-label="فیلتر وضعیت دعوت" value={invitationStatus ?? ""} onChange={(event) => updateParams({ invitationStatus: event.target.value || null })} className="min-h-8 px-2 text-xs">
-                  <option value="">همه دعوت‌ها</option>
-                  <option value="PENDING">در انتظار فعال‌سازی</option>
-                  <option value="EXPIRED">منقضی‌شده</option>
-                  <option value="REVOKED">لغو‌شده</option>
-                  <option value="CONSUMED">استفاده‌شده</option>
-                  <option value="NONE">بدون دعوت</option>
-                </Select>
-              </HeaderCell>
+              <HeaderCell label="تأیید شماره همراه" sortField="verification" sort={sort} dir={dir} onSort={sortBy} hideSort />
               <th scope="col" className="px-5 py-3 text-end align-top font-bold">عملیات</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map((teacher) => (
-              <tr key={teacher.teacherId} className="hover:bg-sage/25">
-                <td className="px-5 py-4 text-start">
-                  <Link href={`/teachers/${teacher.teacherId}`} className="font-bold text-primary hover:text-secondary">
-                    {teacher.firstName} {teacher.lastName}
-                  </Link>
-                </td>
-                <td className="px-4 py-4 text-end text-xs text-muted">
-                  {formatMobileForDisplay(teacher.mobile) ? (
-                    // Full number, grouped and in Persian digits, rendered LTR so the
-                    // digit order reads the way a phone number should. Kept as text
-                    // with tabular figures so the column stays vertically aligned.
-                    <span dir="ltr" className="inline-block font-bold tabular-nums text-primary">{formatMobileForDisplay(teacher.mobile)}</span>
-                  ) : "ثبت نشده"}
-                </td>
-                <td className="px-4 py-4 text-end text-xs text-muted">{teacher.personnelCode ?? "—"}</td>
-                <td className="px-4 py-4 text-start">
-                  <Badge tone={MEMBERSHIP_STATUS_TONES[teacher.membershipStatus]}>{MEMBERSHIP_STATUS_LABELS[teacher.membershipStatus]}</Badge>
-                </td>
-                <td className="px-4 py-4 text-start text-xs text-muted">
-                  {INVITATION_STATUS_LABELS[teacher.invitationStatus]}
-                  {teacher.invitationExpiresAt ? <span className="mt-1 block text-[11px] text-muted/80">تا {formatPersianDateShort(toIsoDate(teacher.invitationExpiresAt))}</span> : null}
-                </td>
-                <td className="px-5 py-4 text-end">
-                  <Link href={`/teachers/${teacher.teacherId}`} className="text-xs font-bold text-secondary hover:text-primary">مدیریت دبیر</Link>
-                </td>
-              </tr>
-            ))}
+            {rows.map((teacher) => {
+              const verification = teacher.mobileVerified === null ? "none" : teacher.mobileVerified ? "true" : "false";
+              return (
+                <tr key={teacher.registrationId} className="hover:bg-sage/25">
+                  <td className="px-4 py-4 text-start">
+                    {teacher.firstName && teacher.lastName ? (
+                      <Link href={`/teachers/${teacher.registrationId}`} className="font-bold text-primary hover:text-secondary">
+                        {teacher.firstName} {teacher.lastName}
+                      </Link>
+                    ) : (
+                      // Before registration there is no name: the school authorized a
+                      // number, and the person has not identified themselves yet.
+                      <Link href={`/teachers/${teacher.registrationId}`} className="text-xs text-muted hover:text-primary">در انتظار ثبت‌نام</Link>
+                    )}
+                  </td>
+                  <td className="px-4 py-4 text-end text-xs">
+                    <span dir="ltr" className="inline-block font-bold tabular-nums text-primary">{formatMobileForDisplay(teacher.phoneNumber)}</span>
+                  </td>
+                  <td className="px-4 py-4 text-end text-xs text-muted">{teacher.personnelCode ?? "—"}</td>
+                  <td className="px-4 py-4 text-start">
+                    <Badge tone={TEACHER_DISPLAY_STATUS_TONES[teacher.displayStatus]}>{TEACHER_DISPLAY_STATUS_LABELS[teacher.displayStatus]}</Badge>
+                    {teacher.registeredAt ? <span className="mt-1 block text-[11px] text-muted/80">ثبت‌نام {formatPersianDateShort(toIsoDate(teacher.registeredAt))}</span> : null}
+                  </td>
+                  <td className="px-4 py-4 text-start">
+                    <Badge tone={VERIFICATION_TONES[verification]}>{VERIFICATION_LABELS[verification]}</Badge>
+                  </td>
+                  <td className="px-5 py-4">
+                    <TeacherRowActions
+                      registrationId={teacher.registrationId}
+                      statusAction={teacher.statusAction}
+                      rejectionAction={teacher.rejectionAction}
+                      canEditMobile={teacher.canEditMobile}
+                      canDeleteRegistration={teacher.canDeleteRegistration}
+                      compact
+                    />
+                  </td>
+                </tr>
+              );
+            })}
             {rows.length === 0 ? <tr><td colSpan={6} className="p-10 text-center text-sm text-muted">دبیری با این فیلتر پیدا نشد.</td></tr> : null}
           </tbody>
         </table>

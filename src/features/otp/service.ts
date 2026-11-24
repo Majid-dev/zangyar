@@ -255,22 +255,69 @@ export async function verifyOtp(input: VerifyOtpInput, options: VerifyOtpOptions
   const lookup = (executor: Transaction | ReturnType<typeof getDb>) =>
     lockPendingChallenge(executor, input.purpose, mobile);
 
-  type Refusal = { reason: "ABSENT" | "EXPIRED" | "EXHAUSTED" | "MISMATCH" };
+  type RefusalReason = "ABSENT" | "EXPIRED" | "EXHAUSTED" | "MISMATCH";
+  // A refusal carries the locked challenge when one was found, so the bookkeeping
+  // can be applied by whoever handles the refusal rather than inside the aborted
+  // transaction.
+  type Refusal = { reason: RefusalReason; challenge?: typeof otpChallenges.$inferSelect };
+
+  /**
+   * Writes the state change for a failed attempt.
+   *
+   * Takes the locked challenge so the caller decides when it runs: on its own
+   * connection for a standalone call, or inside the caller's transaction when one
+   * is supplied.
+   */
+  const applyFailure = async (
+    executor: Transaction | ReturnType<typeof getDb>,
+    challenge: typeof otpChallenges.$inferSelect,
+    reason: Refusal["reason"],
+  ) => {
+    if (reason === "EXPIRED") {
+      await executor
+        .update(otpChallenges)
+        .set({ status: "REVOKED", revokedAt: now, updatedAt: now })
+        .where(eq(otpChallenges.id, challenge.id));
+      return;
+    }
+
+    if (reason === "EXHAUSTED") {
+      await executor
+        .update(otpChallenges)
+        .set({ status: "EXHAUSTED", updatedAt: now })
+        .where(eq(otpChallenges.id, challenge.id));
+      return;
+    }
+
+    if (reason === "MISMATCH") {
+      const attempts = challenge.attemptCount + 1;
+      await executor
+        .update(otpChallenges)
+        .set({
+          attemptCount: attempts,
+          // Exhausting at the ceiling also frees the single-pending slot, so one more
+          // guess cannot extend the brute-force budget by holding the row open.
+          status: attempts >= challenge.maxAttempts ? "EXHAUSTED" : "PENDING",
+          updatedAt: now,
+        })
+        .where(eq(otpChallenges.id, challenge.id));
+    }
+  };
 
   /**
    * Reads the challenge and, only on a match, consumes it.
    *
-   * Failure branches deliberately write nothing: this runs in a transaction that is
-   * about to abort, so any write here would be discarded. All failure bookkeeping
-   * is `recordFailure`'s job.
+   * A refusal carries the locked challenge so the bookkeeping can be written by
+   * whoever handles it, rather than here where the surrounding transaction is about
+   * to abort and would discard the write.
    */
   const consume = async (tx: Transaction): Promise<VerifyOtpOutcome> => {
     const challenge = await lookup(tx);
     if (!challenge) throw { reason: "ABSENT" } satisfies Refusal;
 
-    if (challenge.expiresAt.getTime() <= now.getTime()) throw { reason: "EXPIRED" } satisfies Refusal;
-    if (challenge.attemptCount >= challenge.maxAttempts) throw { reason: "EXHAUSTED" } satisfies Refusal;
-    if (!verifyOtpCode(input.code, challenge.codeHash, config.hashSecret)) throw { reason: "MISMATCH" } satisfies Refusal;
+    if (challenge.expiresAt.getTime() <= now.getTime()) throw { reason: "EXPIRED", challenge } satisfies Refusal;
+    if (challenge.attemptCount >= challenge.maxAttempts) throw { reason: "EXHAUSTED", challenge } satisfies Refusal;
+    if (!verifyOtpCode(input.code, challenge.codeHash, config.hashSecret)) throw { reason: "MISMATCH", challenge } satisfies Refusal;
 
     await tx
       .update(otpChallenges)
@@ -278,79 +325,58 @@ export async function verifyOtp(input: VerifyOtpInput, options: VerifyOtpOptions
       .where(eq(otpChallenges.id, challenge.id));
 
     return {
-      purpose: challenge.purpose,
+      // The column is typed as the database enum, which retains legacy values the
+      // application no longer accepts. Narrowing keeps the outcome honest: a row can
+      // only have been written by a purpose the service itself allows.
+      purpose: challenge.purpose as OtpPurpose,
       phoneNumber: challenge.phoneNumber,
       schoolId: challenge.schoolId,
       membershipId: challenge.membershipId,
     };
   };
 
-  // Failure bookkeeping runs alone, so a throw cannot undo it.
-  const recordFailure = async (reason: Refusal["reason"]) => {
-    await getDb().transaction(async (tx) => {
-      const challenge = await lookup(tx);
-      if (!challenge) return;
+  const raiseWithFailure = async (caught: unknown, executor: Transaction | null): Promise<never> => {
+    const refusal = isRefusal(caught);
+    if (!refusal) throw caught;
+    if (!refusal.challenge) throw new OtpError("INVALID_CODE", GENERIC_INVALID);
 
-      if (reason === "EXPIRED") {
-        await tx
-          .update(otpChallenges)
-          .set({ status: "REVOKED", revokedAt: now, updatedAt: now })
-          .where(eq(otpChallenges.id, challenge.id));
-        return;
-      }
+    if (executor) {
+      // Inside the caller's transaction: the write commits if the caller commits and
+      // is discarded if it aborts. A caller that wants the ceiling to hold even when
+      // it aborts must verify before opening its transaction.
+      await applyFailure(executor, refusal.challenge, refusal.reason);
+    } else {
+      // Standalone: the failed read was already rolled back, so the bookkeeping is
+      // reloaded under the lock and committed on its own connection.
+      await getDb().transaction(async (tx) => {
+        const fresh = await lookup(tx);
+        if (fresh) await applyFailure(tx, fresh, refusal.reason);
+      });
+    }
 
-      if (reason === "EXHAUSTED") {
-        await tx
-          .update(otpChallenges)
-          .set({ status: "EXHAUSTED", updatedAt: now })
-          .where(eq(otpChallenges.id, challenge.id));
-        return;
-      }
-
-      if (reason === "MISMATCH") {
-        const attempts = challenge.attemptCount + 1;
-        await tx
-          .update(otpChallenges)
-          .set({
-            attemptCount: attempts,
-            // Exhausting at the ceiling also frees the single-pending slot, so one
-            // more guess cannot extend the brute-force budget by holding the row open.
-            status: attempts >= challenge.maxAttempts ? "EXHAUSTED" : "PENDING",
-            updatedAt: now,
-          })
-          .where(eq(otpChallenges.id, challenge.id));
-      }
-    });
+    throw new OtpError("INVALID_CODE", GENERIC_INVALID);
   };
 
   if (options.tx) {
     try {
       return await consume(options.tx);
-    } catch (refusal) {
-      if (!isRefusal(refusal)) throw refusal;
-      // The counter is committed on its own connection, so the caller aborting its
-      // transaction cannot undo it.
-      await recordFailure(refusal.reason);
-      throw new OtpError("INVALID_CODE", GENERIC_INVALID);
+    } catch (caught) {
+      return raiseWithFailure(caught, options.tx);
     }
   }
 
   try {
     return await getDb().transaction(consume);
-  } catch (refusal) {
-    if (!isRefusal(refusal)) throw refusal;
-    await recordFailure(refusal.reason);
-    throw new OtpError("INVALID_CODE", GENERIC_INVALID);
+  } catch (caught) {
+    return raiseWithFailure(caught, null);
   }
 }
 
-function isRefusal(value: unknown): value is { reason: "ABSENT" | "EXPIRED" | "EXHAUSTED" | "MISMATCH" } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "reason" in value &&
-    ["ABSENT", "EXPIRED", "EXHAUSTED", "MISMATCH"].includes((value as { reason: string }).reason)
-  );
+function isRefusal(value: unknown): { reason: "ABSENT" | "EXPIRED" | "EXHAUSTED" | "MISMATCH"; challenge?: typeof otpChallenges.$inferSelect } | null {
+  if (typeof value !== "object" || value === null || !("reason" in value)) return null;
+  const reason = (value as { reason: unknown }).reason;
+  if (reason !== "ABSENT" && reason !== "EXPIRED" && reason !== "EXHAUSTED" && reason !== "MISMATCH") return null;
+  return value as { reason: "ABSENT" | "EXPIRED" | "EXHAUSTED" | "MISMATCH"; challenge?: typeof otpChallenges.$inferSelect };
 }
 
 /** Whether a live challenge exists, for UI affordances such as a resend timer. */

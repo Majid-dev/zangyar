@@ -4,48 +4,64 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 
 import { executeAction } from "@/lib/actions/execute";
-import { actionFailure, type ActionResult, type ActionState } from "@/lib/actions/result";
+import type { ActionResult, ActionState } from "@/lib/actions/result";
 import { formDataToObject } from "@/features/academics/form-data";
-import { requestOtp } from "@/features/otp/service";
 
 import {
-  activateTeacher,
-  createTeacher,
-  resendTeacherInvitation,
-  revokeTeacherInvitation,
-  setTeacherMembershipStatus,
-  updateTeacher,
-  updateTeacherMobile,
-} from "./services";
-import { resolveActivationOtpTarget } from "./queries";
+  TEACHER_DECISION_MESSAGES,
+} from "./status";
 import {
-  activateTeacherSchema,
-  createTeacherSchema,
-  resendTeacherInvitationSchema,
-  revokeTeacherInvitationSchema,
-  teacherTransitionSchema,
-  updateTeacherMobileSchema,
+  completeTeacherRegistration,
+  deleteRegistration,
+  registerTeacherMobile,
+  requestTeacherRegistrationCode,
+  setTeacherStatus,
+  updateRegistrationMobile,
+  updateTeacher,
+} from "./services";
+import {
+  completeTeacherRegistrationSchema,
+  deleteRegistrationSchema,
+  registerTeacherMobileSchema,
+  requestTeacherRegistrationCodeSchema,
+  setTeacherStatusSchema,
+  updateRegistrationMobileSchema,
   updateTeacherSchema,
 } from "./schema";
 
 type FormAction<T> = (previous: ActionState<T>, formData: FormData) => Promise<ActionResult<T>>;
 
-function revalidateTeachers(teacherId?: string) {
+function revalidateTeachers(registrationId?: string) {
   revalidatePath("/teachers");
-  if (teacherId) revalidatePath(`/teachers/${teacherId}`);
+  if (registrationId) revalidatePath(`/teachers/${registrationId}`);
   revalidatePath("/dashboard");
 }
 
-/** Also returns the one-time activation link, which is the only delivery surface. */
-export const createTeacherAction: FormAction<unknown> = async (_previous, formData) =>
+// --- School Admin -----------------------------------------------------------------
+
+export const registerTeacherMobileAction: FormAction<unknown> = async (_previous, formData) =>
   executeAction(async () => {
-    const result = await createTeacher({
-      headers: await headers(),
-      input: createTeacherSchema.parse(formDataToObject(formData)),
-    });
-    revalidateTeachers(result.teacherId);
+    const parsed = registerTeacherMobileSchema.parse(formDataToObject(formData));
+    const result = await registerTeacherMobile({ headers: await headers(), input: parsed });
+    revalidateTeachers(result.registrationId);
     return result;
-  }, "دبیر به مدرسه اضافه شد. پیوند فعال‌سازی را برای او بفرستید.");
+  }, "شماره همراه ثبت شد. دبیر می‌تواند با آن ثبت‌نام کند.");
+
+export const updateRegistrationMobileAction: FormAction<unknown> = async (_previous, formData) =>
+  executeAction(async () => {
+    const parsed = updateRegistrationMobileSchema.parse(formDataToObject(formData));
+    const result = await updateRegistrationMobile({ headers: await headers(), input: parsed });
+    revalidateTeachers(parsed.registrationId);
+    return result;
+  }, "شماره همراه ثبت‌نام به‌روزرسانی شد.");
+
+export const deleteRegistrationAction: FormAction<unknown> = async (_previous, formData) =>
+  executeAction(async () => {
+    const parsed = deleteRegistrationSchema.parse(formDataToObject(formData));
+    const result = await deleteRegistration({ headers: await headers(), input: parsed });
+    revalidateTeachers(parsed.registrationId);
+    return result;
+  }, "شماره همراه ثبت‌شده حذف شد.");
 
 export const updateTeacherAction: FormAction<unknown> = async (_previous, formData) =>
   executeAction(async () => {
@@ -53,73 +69,50 @@ export const updateTeacherAction: FormAction<unknown> = async (_previous, formDa
       headers: await headers(),
       input: updateTeacherSchema.parse(formDataToObject(formData)),
     });
-    revalidateTeachers(result.teacherId);
+    revalidateTeachers(result.registrationId);
     return result;
   }, "اطلاعات دبیر به‌روزرسانی شد.");
 
-export const updateTeacherMobileAction: FormAction<unknown> = async (_previous, formData) =>
+/**
+ * The one status action: approve, reject, deactivate, or reactivate.
+ *
+ * The caller supplies only the target status; which transitions are legal from
+ * where the teacher currently stands is decided by the transition matrix in
+ * `./status`, server-side, so a stale button cannot talk the server into an
+ * illegal move. The success sentence is chosen from the decision the server
+ * actually made rather than from the button that was pressed, so a double-submit
+ * reports a reactivation instead of claiming another approval.
+ */
+export const setTeacherStatusAction: FormAction<unknown> = async (_previous, formData) =>
   executeAction(async () => {
-    const parsed = updateTeacherMobileSchema.parse(formDataToObject(formData));
-    const result = await updateTeacherMobile({ headers: await headers(), input: parsed });
-    revalidateTeachers(parsed.teacherId);
-    return result;
-  }, "شماره همراه دبیر تغییر کرد و دعوت تازه‌ای صادر شد.");
-
-export const setTeacherMembershipStatusAction: FormAction<unknown> = async (_previous, formData) =>
-  executeAction(async () => {
-    const parsed = teacherTransitionSchema.parse(formDataToObject(formData));
-    const result = await setTeacherMembershipStatus({ headers: await headers(), input: parsed });
-    revalidateTeachers(parsed.teacherId);
-    return result;
-  }, "وضعیت حساب دبیر تغییر کرد.");
-
-export const resendTeacherInvitationAction: FormAction<unknown> = async (_previous, formData) =>
-  executeAction(async () => {
-    const parsed = resendTeacherInvitationSchema.parse(formDataToObject(formData));
-    const result = await resendTeacherInvitation({ headers: await headers(), input: parsed });
-    revalidateTeachers(parsed.teacherId);
-    return result;
-  }, "دعوت تازه صادر شد. پیوند قبلی دیگر کار نمی‌کند.");
-
-export const revokeTeacherInvitationAction: FormAction<unknown> = async (_previous, formData) =>
-  executeAction(async () => {
-    const parsed = revokeTeacherInvitationSchema.parse(formDataToObject(formData));
-    const result = await revokeTeacherInvitation({ headers: await headers(), input: parsed });
-    revalidateTeachers(parsed.teacherId);
-    return result;
-  }, "دعوت لغو شد.");
+    const parsed = setTeacherStatusSchema.parse(formDataToObject(formData));
+    const outcome = await setTeacherStatus({ headers: await headers(), input: parsed });
+    revalidateTeachers(parsed.registrationId);
+    return outcome;
+  }).then((result) => (result.ok ? { ...result, message: TEACHER_DECISION_MESSAGES[result.data.decision] } : result));
+// --- Public registration -----------------------------------------------------------
 
 /**
- * Issues an activation code for the mobile an invitation link belongs to.
+ * Step 1: send a code to an authorized number.
  *
- * Public by design: the teacher has no session yet, and the invitation token is
- * the only credential. The mobile is resolved from the token server-side, so the
- * caller never supplies — or learns — the number. The response is deliberately
- * uniform whether or not a code was actually sent, so this cannot be used to probe
- * which numbers exist.
+ * Public by design — the person has no session yet. Takes no tenant input, and the
+ * response never names a school. `sent: false` means no school authorized the
+ * number; the caller shows a generic message either way.
  */
-export const requestActivationCodeAction: FormAction<unknown> = async (_previous, formData) => {
-  const token = String(formData.get("token") ?? "");
-  if (!token) return actionFailure("validation", "پیوند فعال‌سازی معتبر نیست.");
-  return executeAction(async () => {
-    const target = await resolveActivationOtpTarget(token);
-    // An unusable link is reported as such rather than as a delivery problem.
-    if (!target) throw new Error("This activation link is invalid or has expired.");
+export const requestRegistrationCodeAction: FormAction<unknown> = async (_previous, formData) =>
+  executeAction(async () => {
+    const parsed = requestTeacherRegistrationCodeSchema.parse(formDataToObject(formData));
+    return requestTeacherRegistrationCode({ input: parsed });
+  });
 
-    await requestOtp({
-      purpose: "TEACHER_ACTIVATION",
-      mobile: target.mobile,
-      schoolId: target.schoolId,
-      membershipId: target.membershipId,
-      context: { schoolName: target.schoolName },
-    });
-
-    // Never returns the code: in development it is written to the server log.
-    return { sent: true };
-  }, "کد تأیید ارسال شد.");
-};
-
-export const activateTeacherAction: FormAction<unknown> = async (_previous, formData) =>
-  executeAction(async () =>
-    activateTeacher({ input: activateTeacherSchema.parse(formDataToObject(formData)) }),
-  "فعال‌سازی حساب انجام شد. اکنون می‌توانید وارد شوید.");
+/**
+ * Steps 2 and 3: verify the code and complete registration.
+ *
+ * A mobile that no school authorized is refused here even with a valid code, and
+ * the client supplies no school, so a registration cannot be steered at a tenant
+ * the person is not authorized for.
+ */
+export const completeRegistrationAction: FormAction<unknown> = async (_previous, formData) =>
+  executeAction(async () => {
+    return completeTeacherRegistration({ input: completeTeacherRegistrationSchema.parse(formDataToObject(formData)) });
+  }, "ثبت‌نام انجام شد. حساب شما در انتظار تأیید مدیر مدرسه است.");

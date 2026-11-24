@@ -46,7 +46,7 @@ function policy(overrides: Partial<OtpPolicy> = {}): OtpPolicy {
 const DEFAULT_POLICIES: OtpPurposePolicies = {
   // A teacher is mid-activation and waiting, so a short window and a tight
   // attempt ceiling are enough.
-  TEACHER_ACTIVATION: policy(),
+  TEACHER_REGISTRATION: policy(),
   LOGIN: policy(),
   // Recovery is the most attractive target, so it gets the fewest attempts.
   PASSWORD_RESET: policy({ maxAttempts: 3 }),
@@ -78,9 +78,9 @@ function providerName(env: NodeJS.ProcessEnv): OtpProviderName {
 
 export function getOtpConfig(env: NodeJS.ProcessEnv = process.env): OtpConfig {
   const codeLength = positiveInt(env.OTP_CODE_LENGTH, DEFAULT_CODE_LENGTH);
-  const expirySeconds = positiveInt(env.OTP_TTL_SECONDS, DEFAULT_POLICIES.TEACHER_ACTIVATION.expirySeconds);
-  const maxAttempts = positiveInt(env.OTP_MAX_ATTEMPTS, DEFAULT_POLICIES.TEACHER_ACTIVATION.maxAttempts);
-  const cooldown = positiveInt(env.OTP_RESEND_COOLDOWN_SECONDS, DEFAULT_POLICIES.TEACHER_ACTIVATION.resendCooldownSeconds);
+  const expirySeconds = positiveInt(env.OTP_TTL_SECONDS, DEFAULT_POLICIES.TEACHER_REGISTRATION.expirySeconds);
+  const maxAttempts = positiveInt(env.OTP_MAX_ATTEMPTS, DEFAULT_POLICIES.TEACHER_REGISTRATION.maxAttempts);
+  const cooldown = positiveInt(env.OTP_RESEND_COOLDOWN_SECONDS, DEFAULT_POLICIES.TEACHER_REGISTRATION.resendCooldownSeconds);
   const requestWindowSeconds = positiveInt(env.OTP_REQUEST_WINDOW_SECONDS, DEFAULT_REQUEST_WINDOW_SECONDS);
   const requestMax = positiveInt(env.OTP_REQUEST_MAX, DEFAULT_REQUEST_MAX);
 
@@ -102,7 +102,7 @@ export function getOtpConfig(env: NodeJS.ProcessEnv = process.env): OtpConfig {
     // the keyed hash meaningless, so it is caught by the environment gate.
     hashSecret: env.OTP_HASH_SECRET?.trim() || env.BETTER_AUTH_SECRET || "",
     policies: {
-      TEACHER_ACTIVATION: { ...DEFAULT_POLICIES.TEACHER_ACTIVATION, ...overridden },
+      TEACHER_REGISTRATION: { ...DEFAULT_POLICIES.TEACHER_REGISTRATION, ...overridden },
       LOGIN: { ...DEFAULT_POLICIES.LOGIN, ...overridden },
       PASSWORD_RESET: { ...DEFAULT_POLICIES.PASSWORD_RESET, ...overridden },
     },

@@ -11,17 +11,17 @@ export default async function NewTeacherPage() {
   return (
     <AppPage>
       <PageHeader
-        breadcrumbs={[{ label: "داشبورد", href: "/dashboard" }, { label: "دبیران", href: "/teachers" }, { label: "افزودن دبیر" }]}
-        title="افزودن دبیر"
-        description="حساب دبیر با نام و شماره همراه ساخته می‌شود؛ گذرواژه را خود دبیر از پیوند فعال‌سازی تعیین می‌کند."
+        breadcrumbs={[{ label: "داشبورد", href: "/dashboard" }, { label: "دبیران", href: "/teachers" }, { label: "افزودن شماره همراه" }]}
+        title="افزودن شماره همراه"
+        description="شماره همراهی را ثبت کنید که اجازه‌ی ثبت‌نام در این مدرسه را دارد."
         action={<BackLink href="/teachers">بازگشت به دبیران</BackLink>}
       />
 
       <div className="mt-6 max-w-3xl">
         <Panel>
           <SectionHeading
-            title="اطلاعات دبیر"
-            description="تا زمانی که دبیر فعال‌سازی را کامل نکند، امکان ورود به سامانه را ندارد."
+            title="شماره همراه دبیر"
+            description="با ثبت شماره، دبیر می‌تواند از صفحه‌ی ثبت‌نام مشخصات و گذرواژه‌ی خودش را تعیین کند. تأیید نهایی ثبت‌نام با شماست."
           />
           <div className="mt-5">
             <TeacherCreateForm />

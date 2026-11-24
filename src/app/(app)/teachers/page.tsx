@@ -14,8 +14,7 @@ export default async function TeachersPage({ searchParams }: { searchParams: Pro
     name: typeof params.name === "string" ? params.name : undefined,
     mobile: typeof params.mobile === "string" ? params.mobile : undefined,
     personnelCode: typeof params.personnelCode === "string" ? params.personnelCode : undefined,
-    membershipStatus: typeof params.membershipStatus === "string" && params.membershipStatus.length > 0 ? params.membershipStatus : undefined,
-    invitationStatus: typeof params.invitationStatus === "string" && params.invitationStatus.length > 0 ? params.invitationStatus : undefined,
+    status: typeof params.status === "string" && params.status.length > 0 ? params.status : undefined,
     sort: typeof params.sort === "string" ? params.sort : undefined,
     dir: typeof params.dir === "string" ? params.dir : undefined,
     page: typeof params.page === "string" ? params.page : undefined,
@@ -28,7 +27,7 @@ export default async function TeachersPage({ searchParams }: { searchParams: Pro
       <PageHeader
         breadcrumbs={[{ label: "داشبورد", href: "/dashboard" }, { label: "دبیران" }]}
         title="دبیران"
-        description="افزودن دبیر، پیگیری وضعیت دعوت و فعال‌سازی، و مدیریت دسترسی آن‌ها در این مدرسه."
+        description="شماره‌های همراهی که برای ثبت‌نام در این مدرسه مجاز شده‌اند، وضعیت ثبت‌نام و تأیید آن‌ها."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-sage px-3 py-1.5 text-xs font-bold text-primary">{data.total} دبیر</span>
@@ -43,8 +42,7 @@ export default async function TeachersPage({ searchParams }: { searchParams: Pro
           name={filters.name}
           mobile={filters.mobile}
           personnelCode={filters.personnelCode}
-          membershipStatus={filters.membershipStatus}
-          invitationStatus={filters.invitationStatus}
+          status={filters.status}
           sort={filters.sort}
           dir={filters.dir}
         />

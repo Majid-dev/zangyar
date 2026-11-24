@@ -38,13 +38,19 @@ const codeSchema = z.string().trim().min(1);
 const INVALID_CODE_MESSAGE = "This code is invalid or has expired.";
 
 /**
- * Purposes that may reveal whether an account exists.
+ * Purposes served by these endpoints.
  *
- * Activation already reveals it: the teacher reached this flow through an
- * invitation link that names them. Login and password reset must not, so an
- * unknown number gets the same response as a known one and no code is delivered.
+ * `TEACHER_REGISTRATION` is deliberately excluded. Its eligibility rule is not
+ * "does an account exist" but "has a School Admin authorized this number", which
+ * only the teacher feature knows; it is served by `requestTeacherRegistrationCode`
+ * so that rule stays in one place. The plugin's `z.enum(OTP_PURPOSES)` still accepts
+ * the value, so the endpoint refuses it explicitly rather than silently.
+ *
+ * Nothing here reveals whether an account exists: an unknown number gets the same
+ * success response as a known one and no code is delivered. That is the
+ * anti-enumeration property the login and reset flows depend on.
  */
-const REVEALING_PURPOSES = new Set(["TEACHER_ACTIVATION"]);
+const REVEALING_PURPOSES = new Set<string>();
 
 /** Raises the HTTP failure matching a service refusal, without leaking which check failed. */
 function raiseForOtpError(error: unknown): never {
@@ -68,10 +74,10 @@ export function otpPlugin() {
     id: "zangyar-otp",
     endpoints: {
       /**
-       * Issues and delivers a code.
+       * Issues and delivers a code for login and password recovery.
        *
-       * For non-revealing purposes this always answers the same way, including when
-       * no account exists, so it cannot be used to enumerate members.
+       * Non-revealing by construction: the response never depends on whether an
+       * account exists, so it cannot be used to enumerate members.
        */
       otpRequest: createAuthEndpoint(
         "/otp/request",
@@ -81,11 +87,18 @@ export function otpPlugin() {
         },
         async (ctx) => {
           const { purpose, mobile } = ctx.body;
+
+          // Registration is served elsewhere; accepting it here would issue a code
+          // for a number no school authorized.
+          if (purpose === "TEACHER_REGISTRATION") {
+            throw APIError.fromStatus(400, { message: "Unsupported purpose." });
+          }
+
           const normalized = normalizeIranianMobile(mobile);
           const reveals = REVEALING_PURPOSES.has(purpose);
 
-          // A non-revealing purpose only proceeds for a verified account; every
-          // other case returns the same success shape without sending anything.
+          // Only a verified account is challenged; every other case returns the same
+          // success shape without sending anything.
           if (!reveals) {
             if (!normalized) return ctx.json({ ok: true as const });
             const [account] = await getDb()

@@ -6,7 +6,7 @@
  * unable to satisfy a TEACHER_ACTIVATION check. The database enum stores the
  * same three values.
  */
-export const OTP_PURPOSES = ["TEACHER_ACTIVATION", "LOGIN", "PASSWORD_RESET"] as const;
+export const OTP_PURPOSES = ["TEACHER_REGISTRATION", "LOGIN", "PASSWORD_RESET"] as const;
 
 export type OtpPurpose = (typeof OTP_PURPOSES)[number];
 
@@ -16,7 +16,7 @@ export function isOtpPurpose(value: unknown): value is OtpPurpose {
 
 /** Persian labels for operator-facing surfaces. */
 export const OTP_PURPOSE_LABELS: Record<OtpPurpose, string> = {
-  TEACHER_ACTIVATION: "فعال‌سازی حساب دبیر",
+  TEACHER_REGISTRATION: "ثبت‌نام دبیر",
   LOGIN: "ورود به حساب",
   PASSWORD_RESET: "بازیابی گذرواژه",
 };

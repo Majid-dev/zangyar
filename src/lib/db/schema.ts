@@ -26,10 +26,18 @@ const timestamps = {
 
 export const schoolStatus = pgEnum("school_status", ["ACTIVE", "SUSPENDED", "ARCHIVED"]);
 export const membershipRole = pgEnum("membership_role", ["SCHOOL_ADMIN", "TEACHER"]);
-export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED"]);
+// A teacher's access is granted only once a School Admin approves them, so the
+// approval decision lives on the membership. Every authorization path already
+// filters `status = 'ACTIVE'`, which means a pending or rejected teacher is
+// denied automatically with no change to any check. `PENDING_ADMIN_APPROVAL` and
+// `REJECTED` were added by a later migration.
+export const membershipStatus = pgEnum("membership_status", ["ACTIVE", "SUSPENDED", "REVOKED", "PENDING_ADMIN_APPROVAL", "REJECTED"]);
 export const academicYearStatus = pgEnum("academic_year_status", ["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]);
-export const teacherInvitationStatus = pgEnum("teacher_invitation_status", ["PENDING", "REVOKED", "CONSUMED"]);
-export const otpPurpose = pgEnum("otp_purpose", ["TEACHER_ACTIVATION", "LOGIN", "PASSWORD_RESET"]);
+export const teacherRegistrationStatus = pgEnum("teacher_registration_status", ["PENDING", "CLAIMED", "REVOKED"]);
+// `TEACHER_REGISTRATION` replaced `TEACHER_ACTIVATION` when invitations were
+// removed. The legacy value remains in the database type but is no longer
+// accepted by the application.
+export const otpPurpose = pgEnum("otp_purpose", ["TEACHER_ACTIVATION", "TEACHER_REGISTRATION", "LOGIN", "PASSWORD_RESET"]);
 export const otpChallengeStatus = pgEnum("otp_challenge_status", ["PENDING", "CONSUMED", "REVOKED", "EXHAUSTED"]);
 export const recordStatus = pgEnum("record_status", ["ACTIVE", "ARCHIVED"]);
 export const studentStatus = pgEnum("student_status", ["ACTIVE", "WITHDRAWN", "GRADUATED", "ARCHIVED"]);
@@ -164,39 +172,50 @@ export const teacherProfiles = pgTable("teacher_profiles", {
 ]);
 
 /**
- * Teacher activation invitations.
+ * A mobile number a School Admin has authorized to join the school.
  *
- * Invitation state is deliberately separate from membership state and from user
- * identity state: a membership is ACTIVE/SUSPENDED/REVOKED and always means
- * school access, while this row tracks whether the teacher has completed
- * activation. `PENDING` past `expiresAt` is read as expired rather than stored,
- * so no sweeper job is required. The plaintext token is never persisted: only
- * its SHA-256 hash is stored, and it is single-use because activation consumes
- * the row conditionally.
+ * This is deliberately separate from both identity and membership, because a
+ * membership requires a `userId` and no account exists until the person
+ * registers. The admin's only assertion is "this number may join us"; the person
+ * supplies their own name, personnel code, and password later, from the public
+ * registration page.
+ *
+ * The row is durable rather than consumed: it is the record of who authorized
+ * which number, it keeps an unclaimed number visible to the admin, and it carries
+ * the resulting membership once registration completes. A number may be
+ * authorized once per school; deleting an unclaimed row and re-adding is allowed.
+ *
+ * It carries no personnel code: that is a teacher-school attribute and belongs on
+ * the profile the teacher's own registration creates (ADR-022, ADR-028).
  */
-export const teacherInvitations = pgTable("teacher_invitations", {
+export const teacherRegistrations = pgTable("teacher_registrations", {
   id: uuid("id").defaultRandom().primaryKey(),
   schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
-  membershipId: uuid("membership_id").notNull(),
-  tokenHash: char("token_hash", { length: 64 }).notNull(),
-  status: teacherInvitationStatus("status").default("PENDING").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
-  createdByUserId: text("created_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
-  consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+  // Canonical `09XXXXXXXXX`, the same normalization the login identity uses.
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  status: teacherRegistrationStatus("status").default("PENDING").notNull(),
+  // Set when the person completes registration; null while only authorized.
+  membershipId: uuid("membership_id"),
+  claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
   revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
-  revokedByUserId: text("revoked_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   ...timestamps,
 }, (table) => [
+  // One live authorization per number per school. A removed number frees the slot
+  // so it can be re-authorized, which is why REVOKED is excluded rather than
+  // treated as a plain uniqueness conflict.
+  uniqueIndex("teacher_registrations_school_phone_unique").on(table.schoolId, table.phoneNumber).where(sql`status <> 'REVOKED'`),
+  // Tolerates a null membership while only authorized, and once set guarantees the
+  // membership belongs to this same school.
   foreignKey({
     columns: [table.schoolId, table.membershipId],
     foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
-    name: "teacher_invitations_school_membership_fk",
+    name: "teacher_registrations_school_membership_fk",
   }).onDelete("restrict"),
-  unique("teacher_invitations_token_hash_unique").on(table.tokenHash),
-  // At most one usable invitation per membership. Resending revokes the current
-  // pending row before inserting, so the slot is always freed first.
-  uniqueIndex("teacher_invitations_one_pending_per_membership_idx").on(table.schoolId, table.membershipId).where(sql`status = 'PENDING'`),
-  index("teacher_invitations_school_membership_idx").on(table.schoolId, table.membershipId, table.createdAt),
+  index("teacher_registrations_school_status_idx").on(table.schoolId, table.status),
+  // Public registration looks a number up across all schools, so this is not
+  // school-prefixed on purpose.
+  index("teacher_registrations_phone_idx").on(table.phoneNumber),
 ]);
 
 /**

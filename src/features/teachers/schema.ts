@@ -3,15 +3,13 @@ import { z } from "zod";
 import { toAsciiDigits } from "@/lib/digits";
 import { isValidIranianMobile, normalizeIranianMobile } from "@/lib/mobile";
 
-import { effectiveInvitationStatus, type EffectiveInvitationStatus, type MembershipStatus } from "./status";
-
 const uuid = z.string().uuid();
 
 /**
- * The teacher's mobile number is their login identity, so it normalizes through
- * the same canonicalization point as authentication: one stored spelling, one
- * lookup. Accepting localized digits here means a School Admin can paste a number
- * written in Persian digits.
+ * The mobile number is the login identity, so every path that accepts one
+ * normalizes through the same canonicalization used by authentication: one stored
+ * spelling, one lookup. Localized digits are accepted because an admin may paste a
+ * number written in Persian digits.
  */
 const normalizedMobile = z.preprocess(
   (value) => normalizeIranianMobile(typeof value === "string" ? value : null),
@@ -27,95 +25,114 @@ const personnelCode = z.preprocess(
 
 const personName = z.string().trim().min(1, "این فیلد الزامی است.").max(100);
 
-/**
- * Note the absence of any role field. A teacher is always provisioned with the
- * TEACHER role, and no input path may change that, so the schema does not offer
- * one to forge in the first place.
- */
-export const createTeacherSchema = z.object({
-  firstName: personName,
-  lastName: personName,
-  mobile: normalizedMobile,
-  personnelCode: personnelCode.optional().default(null),
-});
-
-export const updateTeacherSchema = z.object({
-  teacherId: uuid,
-  firstName: personName,
-  lastName: personName,
-  personnelCode: personnelCode.optional().default(null),
-});
-
-/**
- * Editing the mobile number of a teacher whose account is not yet activated.
- *
- * Only usable while activation is outstanding. The number is normalized and
- * validated exactly as at provisioning, and the verification state is re-asserted
- * by the service rather than accepted from this input.
- */
-export const updateTeacherMobileSchema = z.object({
-  teacherId: uuid,
-  mobile: normalizedMobile,
-});
-
-export const teacherTransitionSchema = z.object({
-  teacherId: uuid,
-  status: z.enum(["ACTIVE", "SUSPENDED", "REVOKED"]),
-});
-
-export const resendTeacherInvitationSchema = z.object({ teacherId: uuid });
-export const revokeTeacherInvitationSchema = z.object({ teacherId: uuid });
-
 const password = z
   .string()
   .min(8, "گذرواژه باید حداقل ۸ نویسه باشد.")
   .max(128, "گذرواژه نمی‌تواند بیشتر از ۱۲۸ نویسه باشد.");
 
-/** Public activation input. It carries no tenant or user identity by design. */
-export const activateTeacherSchema = z
+/**
+ * A School Admin authorizing a mobile number to join the school.
+ *
+ * Only the number is supplied. The person's name and personnel code are theirs to
+ * provide when they register, not the admin's to assert: the admin is entitled to
+ * say "this number may join us" and nothing more.
+ */
+export const registerTeacherMobileSchema = z.object({
+  mobile: normalizedMobile,
+});
+
+/** Correcting an authorized-but-unclaimed number. */
+export const updateRegistrationMobileSchema = z.object({
+  registrationId: uuid,
+  mobile: normalizedMobile,
+});
+
+/** Deleting an authorized-but-unclaimed number outright. */
+export const deleteRegistrationSchema = z.object({ registrationId: uuid });
+
+/** Post-registration edits to the details the teacher supplied. */
+export const updateTeacherSchema = z.object({
+  registrationId: uuid,
+  firstName: personName,
+  lastName: personName,
+  personnelCode: personnelCode.optional().default(null),
+});
+
+/**
+ * The one status transition a School Admin performs on a teacher.
+ *
+ * Approval, rejection, deactivation, and reactivation are the same operation —
+ * "move this teacher's access to that status" — so they share one schema and one
+ * service. Which targets are legal from a given status is decided by the
+ * transition matrix in `./status`, not here, so the rule has exactly one home.
+ */
+export const setTeacherStatusSchema = z.object({
+  registrationId: uuid,
+  status: z.enum(["ACTIVE", "SUSPENDED", "REJECTED"]),
+});
+
+/** Public registration, step 1. Carries no tenant information by design. */
+export const requestTeacherRegistrationCodeSchema = z.object({ mobile: normalizedMobile });
+
+/**
+ * Public registration, steps 2 and 3.
+ *
+ * The mobile is repeated only as the lookup key for the OTP challenge; it is never
+ * taken as authorization, and the schools involved are resolved server-side from
+ * the authorization records. There is no school, membership, or role field, so
+ * none can be forged.
+ *
+ * The personnel code is supplied here rather than by the admin, because it is the
+ * teacher's own employment detail at the school. It is optional: a school that
+ * does not issue codes must not be blocked from receiving registrations.
+ */
+export const completeTeacherRegistrationSchema = z
   .object({
-    token: z.string().trim().min(1, "پیوند فعال‌سازی معتبر نیست."),
-    // The code is normalized through the same digit conversion as every other
-    // Persian input, so a code typed with Persian digits is accepted.
+    mobile: normalizedMobile,
     code: z.preprocess(
       (value) => (typeof value === "string" ? toAsciiDigits(value).replace(/\s/g, "") : value),
       z.string().regex(/^\d{4,10}$/, "کد تأیید باید فقط رقم باشد."),
     ),
-    newPassword: password,
+    firstName: personName,
+    lastName: personName,
+    personnelCode: personnelCode.optional().default(null),
+    password,
     confirmPassword: z.string(),
   })
-  .refine((value) => value.newPassword === value.confirmPassword, {
+  .refine((value) => value.password === value.confirmPassword, {
     path: ["confirmPassword"],
     message: "تکرار گذرواژه با گذرواژه یکسان نیست.",
   });
 
-export const teacherSortFieldSchema = z.enum(["name", "mobile", "status", "invitation", "personnel"]);
+export const teacherSortFieldSchema = z.enum(["name", "mobile", "status", "verification", "personnel"]);
 export const sortDirectionSchema = z.enum(["asc", "desc"]);
-export const membershipStatusSchema = z.enum(["ACTIVE", "SUSPENDED", "REVOKED"]);
-export const invitationStatusFilterSchema = z.enum(["PENDING", "EXPIRED", "REVOKED", "CONSUMED", "NONE"]);
+export const teacherDisplayStatusSchema = z.enum([
+  "PENDING_REGISTRATION",
+  "PENDING_ADMIN_APPROVAL",
+  "ACTIVE",
+  "REJECTED",
+  "DEACTIVATED",
+]);
 
 /**
  * URL-derived list filters. Every value is a bounded whitelist or a length-capped
- * string so a hand-edited query string cannot widen a query or reach the
- * database unchanged.
+ * string so a hand-edited query string cannot widen a query or reach the database
+ * unchanged.
  */
 export const teacherListFilterSchema = z.object({
   name: z.string().trim().max(100).optional(),
   mobile: z.string().trim().max(20).optional(),
   personnelCode: z.string().trim().max(50).optional(),
-  membershipStatus: membershipStatusSchema.optional(),
-  invitationStatus: invitationStatusFilterSchema.optional(),
+  status: teacherDisplayStatusSchema.optional(),
   sort: teacherSortFieldSchema.default("name"),
   dir: sortDirectionSchema.default("asc"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-export type CreateTeacherInput = z.input<typeof createTeacherSchema>;
+export type RegisterTeacherMobileInput = z.input<typeof registerTeacherMobileSchema>;
+export type UpdateRegistrationMobileInput = z.input<typeof updateRegistrationMobileSchema>;
 export type UpdateTeacherInput = z.input<typeof updateTeacherSchema>;
-export type UpdateTeacherMobileInput = z.input<typeof updateTeacherMobileSchema>;
-export type TeacherTransitionInput = z.infer<typeof teacherTransitionSchema>;
-export type ActivateTeacherInput = z.input<typeof activateTeacherSchema>;
+export type SetTeacherStatusInput = z.input<typeof setTeacherStatusSchema>;
+export type CompleteTeacherRegistrationInput = z.input<typeof completeTeacherRegistrationSchema>;
 export type TeacherListFilter = z.infer<typeof teacherListFilterSchema>;
-export type { EffectiveInvitationStatus, MembershipStatus };
-export { effectiveInvitationStatus };
