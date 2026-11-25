@@ -17,6 +17,13 @@ type Mode = "password" | "otp";
  * Two paths: mobile + password (the original), and mobile + one-time code. The
  * login identity is the mobile number either way. Failures stay deliberately
  * generic — the form never reveals whether a mobile number has an account.
+ *
+ * Every handler clears its pending flag in a `finally` rather than on the success
+ * path. A fetch that rejects — a dropped mobile connection, or the request aborted
+ * because the browser backgrounded the tab — would otherwise leave `pending` true
+ * forever, and since it disables both submit buttons the form would be left
+ * permanently inert with no error shown. `finally` also covers a throw from the
+ * auth client itself, which rejects rather than returning an `error`.
  */
 export function LoginForm() {
   const router = useRouter();
@@ -62,19 +69,27 @@ export function LoginForm() {
     setPending(true);
     setFailure(null);
 
-    const { error } = await signIn.phoneNumber({ phoneNumber: normalized, password });
+    try {
+      const { error } = await signIn.phoneNumber({ phoneNumber: normalized, password });
 
-    if (error) {
+      if (error) {
+        setFailure({
+          message: error.status === 400 ? "شماره همراه واردشده معتبر نیست." : "شماره همراه یا گذرواژه درست نیست.",
+          field: error.status === 400 ? "mobile" : "form",
+        });
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      // The request never completed. Reported as a form-level failure so the user
+      // knows to retry, rather than silently returning to an enabled but unchanged
+      // form that looks like it ignored the tap.
+      setFailure({ message: "ارتباط با سامانه برقرار نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.", field: "form" });
+    } finally {
       setPending(false);
-      setFailure({
-        message: error.status === 400 ? "شماره همراه واردشده معتبر نیست." : "شماره همراه یا گذرواژه درست نیست.",
-        field: error.status === 400 ? "mobile" : "form",
-      });
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   async function onRequestCode() {
@@ -85,18 +100,22 @@ export function LoginForm() {
     setPending(true);
     setFailure(null);
 
-    // The endpoint answers the same way whether or not the number has an account,
-    // so this message never confirms that an account exists.
-    const result = await requestOtpCode({ purpose: "LOGIN", mobile: normalized });
-    setPending(false);
+    try {
+      // The endpoint answers the same way whether or not the number has an account,
+      // so this message never confirms that an account exists.
+      const result = await requestOtpCode({ purpose: "LOGIN", mobile: normalized });
 
-    if (result.status === 429) {
-      setFailure({ message: "تعداد درخواست کد زیاد بوده است. کمی بعد دوباره تلاش کنید.", field: "form" });
-      return;
+      if (result.status === 429) {
+        setFailure({ message: "تعداد درخواست کد زیاد بوده است. کمی بعد دوباره تلاش کنید.", field: "form" });
+        return;
+      }
+
+      setCodeSent(true);
+    } catch {
+      setFailure({ message: "ارسال کد تأیید ممکن نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.", field: "form" });
+    } finally {
+      setPending(false);
     }
-
-    setCodeSent(true);
-    setFailure(null);
   }
 
   async function onSubmitOtp(event: React.FormEvent<HTMLFormElement>) {
@@ -113,16 +132,21 @@ export function LoginForm() {
     setPending(true);
     setFailure(null);
 
-    const result = await loginWithOtp({ mobile: normalized, code: code.trim() });
-    setPending(false);
+    try {
+      const result = await loginWithOtp({ mobile: normalized, code: code.trim() });
 
-    if (!result.ok) {
-      setFailure({ message: "کد تأیید نامعتبر است یا منقضی شده است.", field: "code" });
-      return;
+      if (!result.ok) {
+        setFailure({ message: "کد تأیید نامعتبر است یا منقضی شده است.", field: "code" });
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setFailure({ message: "ارتباط با سامانه برقرار نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.", field: "form" });
+    } finally {
+      setPending(false);
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (

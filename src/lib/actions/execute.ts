@@ -25,6 +25,13 @@ function errorKind(error: unknown) {
   return "server" as const;
 }
 
+/**
+ * Failures the operator can correct, which are reported as validation input
+ * rather than as a server fault. Matched by exact message so the classification
+ * stays explicit and an unrelated error cannot drift into it.
+ */
+const ACTIONABLE_MESSAGES = new Set(["The current password is incorrect.", "This account has no password credential."]);
+
 /** Execute a Server Action operation without leaking raw errors to the browser. */
 export async function executeAction<T>(operation: ActionOperation<T>, successMessage?: string): Promise<ActionResult<T>> {
   try {
@@ -35,6 +42,8 @@ export async function executeAction<T>(operation: ActionOperation<T>, successMes
 
     const translated = toUserMessage(error);
     if (!translated.known) console.error("Server action failed:", safeLogMessage(error));
-    return actionFailure(errorKind(error), translated.message);
+
+    const kind = error instanceof Error && ACTIONABLE_MESSAGES.has(error.message) ? "validation" : errorKind(error);
+    return actionFailure(kind, translated.message);
   }
 }

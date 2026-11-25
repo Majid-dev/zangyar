@@ -17,7 +17,6 @@ export default async function DashboardPage() {
   return (
     <AppPage>
       <PageHeader
-        breadcrumbs={[{ label: "داشبورد" }]}
         title="صبح بخیر"
         description="نمایی کوتاه از وضعیت امروز مدرسه؛ برای شروع روزی منظم و آرام."
         action={

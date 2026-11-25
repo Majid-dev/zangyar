@@ -46,7 +46,7 @@ Every school-owned table has a non-null `schoolId`. Every query and mutation inv
 A protected server operation follows this order:
 
 1. Establish the authenticated user from the Better Auth session.
-2. Resolve the active school from a verified membership. Reject missing, inactive, or ambiguous membership context.
+2. Resolve the active school from a verified membership. Reject missing or inactive membership context; when the user has several, select among them as described under **Active-school selection** below.
 3. Check the membership role or required permission.
 4. Load the target resource with the active `schoolId` in the query.
 5. Verify resource-specific ownership, such as teacher assignment or classroom enrollment.
@@ -80,6 +80,18 @@ PostgreSQL Row Level Security may be considered later as defense in depth. It sh
 ### Shared application shell
 
 Authenticated routes use one shared `(app)` layout for the persistent sidebar, responsive mobile drawer, school context, and role-filtered navigation. Navigation visibility is presentation only; every destination retains its own server-side authorization. Back links use explicit parent routes rather than `router.back()`, so direct URL entry cannot create history loops or ambiguous navigation.
+
+The layout also resolves the account control: the signed-in name, school-level role, and the schools the user may enter. It is assembled from the same verified membership context every other server read uses, so the menu cannot offer a school the request was not authorized for. Its panel is a popover on desktop and a bottom sheet on mobile; the sheet is portalled to the document body because the mobile header is a `backdrop-filter` element, which would otherwise become the containing block for its `position: fixed` layer.
+
+### Active-school selection
+
+A user with several memberships needs exactly one active school per request. The selection is resolved in `requireSchoolAccess`:
+
+1. Load the user's verified, `ACTIVE` memberships, ordered by creation.
+2. If the caller passed an explicit `schoolId`, hold it to the strict rule in `selectActiveMembership`: no verified membership there means `SCHOOL_ACCESS_DENIED`, never a fallback.
+3. Otherwise read the persisted preference (`lib/auth/active-school`) and pass it to `selectPreferredMembership`, which selects among the already-verified rows and falls back to the first when the preference matches none.
+
+The preference is therefore not authorization. It is an HttpOnly, SameSite=Lax cookie whose value is validated as a UUID before it is used, and it can only ever narrow which of the user's *own* memberships is opened: a stale value, or one hand-edited to name another tenant's school, matches no row and is discarded. Switching is a Server Action that authorizes the target school the strict way and then writes the cookie; the form is only rendered for a teacher with more than one school, but the server's check is what enforces it. Sign-out clears the cookie together with the session, so a shared browser carries no school context into the next session.
 
 ### Transaction boundaries
 
@@ -159,6 +171,11 @@ These are recorded, not yet closed, and are outside the current slice:
 - `/sign-up/email` remains enabled because several existing integration suites depend on it. It creates a user with no membership, which `getSchoolContext` refuses as `NO_SCHOOL`, so it is not a tenant bypass — but it is an unauthenticated account-creation surface and should be reviewed before production.
 - OTP login mints a session for any account with a verified mobile number, including one with no school membership. That holder then sees the `NO_SCHOOL` access state, which is consistent with how a memberless session is already treated — but it does mean a session can exist for a user with no school.
 - A failed verification's attempt counter is committed on a separate connection from the caller's transaction. That is deliberate (see above), but it means the counter write is not atomic with the caller's own rollback.
+- Account settings has no email field and no mobile change: the mobile number is the login identity, and correcting it is an authorized path (a teacher's unclaimed number by a School Admin, or a re-registration), not a self-service edit. Changing a *verified* number would need its own verification flow, which does not exist yet.
+- A teacher's display name is stored twice — on the global account and on the school-local profile of the active school. `updateOwnProfile` writes both for the active school only, so a teacher in two schools can show a different name in each; the teacher list reads the school-local copy, and the shell reads whichever school is active. Reconciling them is not desirable (ADR-022 makes them per-school records), but the duplication is worth noting.
+- `user.firstName` / `user.lastName` are nullable and only filled once an account saves its name through `/settings`. An account that never has shows its whole `name` in the first-name field, so the form is lossless but the two fields stay combined until the user splits them. A migration deliberately does not guess a split for existing rows.
+- The `user` pair and `teacher_profiles` are still written together for a teacher, so a teacher's edits through `/settings` update their account pair as well as the active school's profile. Nothing propagates a name change to the other schools they belong to.
+- `/settings` is reachable by any role, and its password form is offered whenever the account exists. An account with no password credential (none is currently creatable through the product flows) would get a mapped refusal rather than a form that explains itself up front.
 
 
 ## Audit architecture
@@ -190,11 +207,19 @@ The initial Phase 3 authorization boundary is now in place in `src/lib/auth/auth
 - A requested `schoolId` is only a selector against verified memberships, never authorization evidence.
 - Ambiguous membership context, missing membership, unauthenticated access, wrong role, and missing Platform Admin access are rejected.
 - Membership mutations use Zod validation, tenant-scoped updates, transactions, and audit events in `src/features/memberships/services.ts`.
-- Pure active-school selection tests cover missing, ambiguous, matching, and cross-tenant selectors.
+- Pure active-school selection tests cover missing, matching, and cross-tenant selectors, and the preference fallback.
 - Login identity is the normalized Iranian mobile number, and the public `(auth)/login` route is the only product credential surface.
 - Persisted coverage runs through `corepack pnpm test:integration:auth` in an ephemeral migrated database: mobile login success and failure, OTP endpoint closure, demo seed idempotency and password preservation, and tenant/role isolation.
 
 Remaining Phase 3 work: continue domain-specific resource-ownership cases as later domain resources are implemented; add membership-management HTTP route boundaries if exposed beyond Server Actions; close the known authorization gaps listed above.
+
+### Account settings slice
+
+Every signed-in user has an account control in the shell and a `/settings` page. The control shows the name, the school-level role, and the active school, and offers the school switcher (teachers with more than one school only, per ADR-029), Settings, and sign-out. The page edits the two things a user owns — their display name and their password — and states what it deliberately does not: the mobile number is the login identity and is changed by an authorized school path, and role, membership, and access status are not user-editable inputs at all.
+
+The name is written to the account's own `firstName` / `lastName` pair and its `name`, and — for a teacher — to the `teacher_profiles` row of the *active* school only, because a teacher's profile is school-local (ADR-022) and a name change in one school is not that school's to make in another. Storing the pair is what keeps the form idempotent: it is loaded from those two fields rather than re-derived from `name`, so saving an untouched form cannot reorder a multi-word name (see ADR-030). The password change delegates to Better Auth's `/change-password`, which verifies the current password against the stored hash; `revokeOtherSessions` is left off because the endpoint mints a replacement session and needs to write its cookie, which a Server Action cannot do for the caller, so revoking there would sign the user out of the request that made it. Sign-out revokes the session through Better Auth and clears the school preference, and waits for both before navigating, so the login page is never reached while a session is still valid.
+
+Persisted coverage runs through `corepack pnpm test:integration:account`.
 
 ### Teacher registration slice
 

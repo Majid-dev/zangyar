@@ -1,31 +1,22 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-import { signOut } from "@/lib/auth/client";
+import { useSignOut } from "./use-sign-out";
 
 /**
- * Sign-out control for the authenticated shell. The session cookie is cleared
- * by the auth server, so the redirect always lands on a real unauthenticated
- * state rather than a client-side illusion.
+ * Standalone sign-out control, for surfaces that are not the profile menu — the
+ * access states shown when a session exists but no school can be entered.
+ *
+ * It shares the menu's sign-out path rather than calling the auth client
+ * directly, so the session and the stored school preference are always cleared
+ * together.
  */
 export function SignOutButton({ className = "" }: { className?: string }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-
-  async function onSignOut() {
-    if (pending) return;
-    setPending(true);
-    await signOut();
-    router.push("/login");
-    router.refresh();
-  }
+  const { endSession, pending } = useSignOut();
 
   return (
     <button
       type="button"
-      onClick={onSignOut}
+      onClick={endSession}
       disabled={pending}
       aria-busy={pending || undefined}
       className={`inline-flex min-h-9 items-center gap-2 rounded-xl px-3 text-xs font-bold text-muted transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-wait disabled:opacity-60 ${className}`}

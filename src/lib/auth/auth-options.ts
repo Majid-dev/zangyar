@@ -7,6 +7,7 @@ import { phoneNumber } from "better-auth/plugins";
 
 import { getDb } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
+import { DEV_LAN_ORIGINS } from "@/lib/dev-origins";
 import { getEnv } from "@/lib/env";
 import { isValidIranianMobile, normalizeIranianMobile } from "@/lib/mobile";
 import { getOtpConfig } from "@/lib/otp/config";
@@ -57,6 +58,23 @@ export function authOptions(database: AuthDatabase, overrides: { transaction?: b
   return {
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    /**
+     * Extra origins trusted for state-changing requests and redirects.
+     *
+     * Better Auth already trusts its own `baseURL` origin and appends this list, so
+     * this only ever widens what is accepted. It is needed because testing on a
+     * phone means the page's origin is the machine's LAN address rather than
+     * `localhost`, and the library's CSRF check refuses an unrecognized `Origin`
+     * with `403 Invalid origin` — which is what broke sign-out on the phone.
+     *
+     * Development only, and positively so: the list applies when `NODE_ENV` is
+     * explicitly `development`, so a test run, a production build, or an unset
+     * environment all fall back to trusting only `BETTER_AUTH_URL`. Trusting an
+     * origin is exactly what CSRF protection tests against, so the default has to
+     * be the strict one. The same list also feeds Next's `allowedDevOrigins`; see
+     * `src/lib/dev-origins.ts`.
+     */
+    trustedOrigins: env.NODE_ENV === "development" ? [...DEV_LAN_ORIGINS] : [],
     database: drizzleAdapter(database, {
       provider: "pg",
       schema,

@@ -52,9 +52,18 @@ export const notificationAttemptStatus = pgEnum("notification_attempt_status", [
 // `phoneNumber` is the login identity (canonical `09XXXXXXXXX`, see lib/mobile.ts);
 // `email` remains a required unique column because Better Auth identity rows and
 // the development bootstrap still provision one.
+//
+// `firstName` / `lastName` are the account's own name pair, alongside the single
+// `name` Better Auth requires. Nullable, because `name` remains the only field
+// every existing account is guaranteed to have: a row with a null pair is a
+// legacy account whose pair is not yet known, and the account surface must not
+// invent one by splitting `name` on every read. Both are written together by
+// `updateOwnProfile`, so they are either both set or both null.
 export const users = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  firstName: varchar("first_name", { length: 100 }),
+  lastName: varchar("last_name", { length: 100 }),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
