@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { BrandLockup } from "@/components/layout/brand";
 import { SignOutButton } from "@/features/auth/components/sign-out-button";
 
 export type AccessState = "UNAUTHENTICATED" | "NO_SCHOOL" | "FORBIDDEN";
@@ -44,8 +45,10 @@ export function AccessState({ state }: { state: AccessState }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center p-6">
       <section className="w-full rounded-3xl border border-border bg-surface p-8 text-center shadow-[0_14px_40px_rgba(23,59,87,0.06)]">
-        <p className="text-sm font-bold text-secondary">زنگ‌یار</p>
-        <h1 className="mt-3 text-3xl font-black text-primary">{title}</h1>
+        <span className="flex justify-center">
+          <BrandLockup size={44} showTagline={false} />
+        </span>
+        <h1 className="mt-4 text-3xl font-black text-primary">{title}</h1>
         <p className="mt-4 leading-8 text-muted">{message}</p>
         {action}
       </section>

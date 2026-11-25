@@ -45,14 +45,22 @@ export function ResetPasswordForm() {
 
     setPending(true);
     setFailure(null);
-    const result = await requestOtpCode({ purpose: "PASSWORD_RESET", mobile: normalized });
-    setPending(false);
 
-    if (result.status === 429) {
-      setFailure({ message: "تعداد درخواست کد زیاد بوده است. کمی بعد دوباره تلاش کنید.", field: "form" });
-      return;
+    // `finally` so a rejected fetch cannot strand `pending`: it disables every
+    // control on this form, so a stuck flag makes the page permanently inert.
+    try {
+      const result = await requestOtpCode({ purpose: "PASSWORD_RESET", mobile: normalized });
+
+      if (result.status === 429) {
+        setFailure({ message: "تعداد درخواست کد زیاد بوده است. کمی بعد دوباره تلاش کنید.", field: "form" });
+        return;
+      }
+      setCodeSent(true);
+    } catch {
+      setFailure({ message: "ارسال کد تأیید ممکن نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.", field: "form" });
+    } finally {
+      setPending(false);
     }
-    setCodeSent(true);
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -72,14 +80,20 @@ export function ResetPasswordForm() {
 
     setPending(true);
     setFailure(null);
-    const result = await resetPasswordWithOtp({ mobile: normalized, code: code.trim(), newPassword: password });
-    setPending(false);
 
-    if (!result.ok) {
-      setFailure({ message: "کد تأیید نامعتبر است یا منقضی شده است.", field: "code" });
-      return;
+    try {
+      const result = await resetPasswordWithOtp({ mobile: normalized, code: code.trim(), newPassword: password });
+
+      if (!result.ok) {
+        setFailure({ message: "کد تأیید نامعتبر است یا منقضی شده است.", field: "code" });
+        return;
+      }
+      setDone(true);
+    } catch {
+      setFailure({ message: "ارتباط با سامانه برقرار نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.", field: "form" });
+    } finally {
+      setPending(false);
     }
-    setDone(true);
   }
 
   if (done) {

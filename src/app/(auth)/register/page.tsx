@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
 import { getAuth } from "@/lib/auth";
+import { BrandLockup } from "@/components/layout/brand";
 import { TeacherRegistrationForm } from "@/features/teachers/components/register-form";
 
 export const metadata: Metadata = {
@@ -28,12 +29,8 @@ export default async function RegisterPage() {
         <span className="absolute -end-24 top-24 size-72 rounded-full border-[26px] border-white/5" aria-hidden="true" />
         <span className="absolute -start-16 bottom-10 size-56 rounded-full bg-secondary/15" aria-hidden="true" />
 
-        <div className="relative flex items-center gap-3">
-          <span className="flex size-11 items-center justify-center rounded-xl bg-white/10 text-lg font-black">ز</span>
-          <span>
-            <span className="block text-base font-black tracking-tight">زنگ‌یار</span>
-            <span className="block text-[11px] text-white/60">مدرسه در جریان، خانواده در کنار</span>
-          </span>
+        <div className="relative">
+          <BrandLockup tone="dark" size={44} />
         </div>
 
         <div className="relative max-w-lg">
@@ -49,9 +46,8 @@ export default async function RegisterPage() {
 
       <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-10 lg:min-h-0">
         <div className="w-full max-w-md">
-          <div className="flex items-center gap-3 lg:hidden">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-lg font-black text-white">ز</span>
-            <span className="text-base font-black tracking-tight text-primary">زنگ‌یار</span>
+          <div className="lg:hidden">
+            <BrandLockup size={44} showTagline={false} />
           </div>
 
           <div className="mt-10 lg:mt-0">

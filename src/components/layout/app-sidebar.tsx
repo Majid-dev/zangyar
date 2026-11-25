@@ -1,7 +1,6 @@
-import Link from "next/link";
-
 import { ProfileMenu } from "@/features/account/components/profile-menu";
 import type { ShellProfile } from "@/features/account/profile";
+import { BrandLockup } from "./brand";
 import { AppNav } from "./app-nav";
 import type { NavSection } from "./nav-items";
 
@@ -23,15 +22,7 @@ type SidebarChromeProps = {
 };
 
 export function SidebarBrand() {
-  return (
-    <Link href="/dashboard" className="flex items-center gap-3 px-3">
-      <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-lg font-black text-white">ز</span>
-      <span>
-        <span className="block text-base font-black tracking-tight text-primary">زنگ‌یار</span>
-        <span className="block text-[11px] text-muted">مدرسه در جریان</span>
-      </span>
-    </Link>
-  );
+  return <BrandLockup href="/dashboard" size={40} className="px-3" />;
 }
 
 /**
