@@ -8,16 +8,18 @@ import { formatPersianDate, getSchoolBusinessDate } from "@/lib/date";
 /**
  * Period-level attendance.
  *
- * The page's subject is a period, not a class: a class has several lessons a day
- * and each is submitted by whoever teaches it. `timetableEntryId` in the query
- * string names which one is open, and `businessDate` is carried explicitly so a
- * School Admin can correct an earlier day while a teacher is held to today.
+ * The page's subject is a period of a class, not a whole day: a class has several
+ * lessons a day and each is submitted by whoever owns it that week. `classroomId`
+ * and `periodId` in the query string name which one is open, and `businessDate` is
+ * carried explicitly so a School Admin can correct an earlier day while a teacher
+ * is held to today.
  */
 export default async function AttendancePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const access = await requirePageAccess(["SCHOOL_ADMIN", "TEACHER"]);
   if (access.blocked) return access.blocked;
   const params = await searchParams;
-  const timetableEntryId = typeof params.timetableEntryId === "string" ? params.timetableEntryId : undefined;
+  const periodId = typeof params.periodId === "string" ? params.periodId : undefined;
+  const classroomId = typeof params.classroomId === "string" ? params.classroomId : undefined;
   // Only a School Admin may look at a date other than today; for a teacher the
   // server refuses a different date on submit anyway, so offering the control
   // would only produce a refusal.
@@ -25,7 +27,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   const businessDate = access.context.role === "SCHOOL_ADMIN" && requestedDate
     ? requestedDate
     : getSchoolBusinessDate(access.context.school.timezone);
-  const workspace = await getAttendanceWorkspaceForContext(access.context, { businessDate, timetableEntryId });
+  const workspace = await getAttendanceWorkspaceForContext(access.context, { businessDate, periodId, classroomId });
 
   return (
     <AppPage>

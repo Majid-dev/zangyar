@@ -2,13 +2,9 @@ import { AppPage } from "@/components/layout/app-shell";
 import { BackLink, PageHeader } from "@/components/layout/page-header";
 import { requirePageAccess } from "@/features/shell/route-access";
 import { getSchoolTimetableSettings, listSchoolPeriods } from "@/features/scheduling/queries";
-import { deletePeriodAction, upsertPeriodAction } from "@/features/scheduling/actions";
 import { SCHOOL_WEEKDAY_LABELS } from "@/features/scheduling/week";
 import { ShiftSettingsForm } from "@/features/scheduling/components/shift-settings-form";
-import { ActionForm, SubmitButton } from "@/components/ui/action-form";
-import { Field, Input } from "@/components/ui/field";
-import { Panel, SectionHeading } from "@/components/ui/panel";
-import { toPersianDigits } from "@/lib/jalali";
+import { PeriodsPanel } from "@/features/scheduling/components/periods-panel";
 
 const weekdayEntries = Object.entries(SCHOOL_WEEKDAY_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -21,6 +17,12 @@ const weekdayEntries = Object.entries(SCHOOL_WEEKDAY_LABELS).map(([value, label]
  * and a school with days but no periods has nothing to schedule into. Splitting
  * them across pages is what produces the "why can't I add a period on Tuesday"
  * class of question.
+ *
+ * The settings panel is the narrower of the two on a wide screen, because it holds
+ * a handful of choices while each period carries two shifts' worth of times and an
+ * edit affordance; giving the periods the room they need is the whole reason the
+ * proportions differ. On a narrow screen the two stack, settings first, so the day
+ * the periods are defined against is chosen before the periods themselves.
  */
 export default async function TimetableSettingsPage() {
   const access = await requirePageAccess(["SCHOOL_ADMIN"]);
@@ -29,7 +31,10 @@ export default async function TimetableSettingsPage() {
     getSchoolTimetableSettings(access.context),
     listSchoolPeriods(access.context),
   ]);
-  const configured = settings.operatingDays.length > 0 && periods.length > 0;
+  // Operating days fall back to a full default week when never saved, so
+  // "configured" asks whether the school has actually saved a week — the default
+  // it is being shown does not mean it is open yet.
+  const configured = settings.operatingDaysConfigured && periods.length > 0;
 
   return (
     <AppPage>
@@ -46,52 +51,26 @@ export default async function TimetableSettingsPage() {
         </div>
       ) : null}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="mt-6 grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start">
         <ShiftSettingsForm
           shiftType={settings.shiftType}
           rotationBaseDate={settings.rotationBaseDate}
           operatingDays={settings.operatingDays}
           weekdays={weekdayEntries}
+          academicYearStartDate={settings.activeAcademicYearStartDate}
         />
 
-        <Panel className="self-start">
-          <SectionHeading
-            eyebrow={`${toPersianDigits(periods.length)} زنگ`}
-            title="زنگ‌های روز"
-            description="هر زنگ دو ساعت است؛ در برنامه هفتگی می‌توانید کل زنگ یا فقط یک ساعت آن را به دبیر بدهید."
-          />
-
-          <div className="mt-5 divide-y divide-border border-t border-border">
-            {periods.length === 0 ? (
-              <p className="py-4 text-sm text-muted">هنوز زنگی تعریف نشده است.</p>
-            ) : periods.map((period) => (
-              <div key={period.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div>
-                  <p className="text-sm font-bold text-primary">زنگ {toPersianDigits(period.ordinal)}</p>
-                  <p className="mt-1 text-xs tabular-nums text-muted" dir="ltr">{period.startTime.slice(0, 5)} – {period.endTime.slice(0, 5)}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-sage px-2.5 py-1 text-[11px] font-bold text-primary">۲ ساعت</span>
-                  <ActionForm action={deletePeriodAction}>
-                    <input type="hidden" name="periodId" value={period.id} />
-                    <SubmitButton size="sm" variant="ghost" pendingLabel="…">حذف</SubmitButton>
-                  </ActionForm>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <ActionForm action={upsertPeriodAction} className="mt-5 grid gap-4 border-t border-border pt-5">
-            <p className="text-xs leading-6 text-muted">
-              زنگ‌ها به ترتیب ساعت شروع شماره‌گذاری می‌شوند و نباید با هم هم‌پوشانی داشته باشند.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="شروع" name="startTime"><Input name="startTime" type="time" required dir="ltr" className="text-start" /></Field>
-              <Field label="پایان" name="endTime"><Input name="endTime" type="time" required dir="ltr" className="text-start" /></Field>
-            </div>
-            <div><SubmitButton variant="secondary" pendingLabel="در حال ذخیره…">افزودن زنگ</SubmitButton></div>
-          </ActionForm>
-        </Panel>
+        <PeriodsPanel
+          shiftType={settings.shiftType}
+          periods={periods.map((period) => ({
+            id: period.id,
+            ordinal: period.ordinal,
+            startTime: period.startTime,
+            endTime: period.endTime,
+            afternoonStartTime: period.afternoonStartTime,
+            afternoonEndTime: period.afternoonEndTime,
+          }))}
+        />
       </div>
     </AppPage>
   );

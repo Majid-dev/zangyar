@@ -39,18 +39,27 @@ const NEXT_SATURDAY = "2026-11-28";
 // 2026-11-26 is a Thursday, which this school does not operate on.
 const THURSDAY = "2026-11-26";
 
+/**
+ * A stored deadline as the school's local wall clock, `HH:MM`.
+ *
+ * The deadline is a real instant; what a teacher works to is the wall-clock time it
+ * lands on in the school's zone, which is what the shift's period end plus the grace
+ * period should produce. Reading it back through the same zone is what makes the
+ * assertion about the schedule rather than about the instant.
+ */
+function formatSchoolDeadline(instant: Date, timezone: string) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(instant);
+}
+
 describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
   let context: { membershipId: string; schoolId: string; userId: string; role: "SCHOOL_ADMIN"; school: typeof schools.$inferSelect };
   let classroomId: string;
   let enrollmentId: string;
   let guardianId: string;
-  let subjectId: string;
   let teacherMembershipId: string;
   let partnerMembershipId: string;
   let periodOneId: string;
   let periodTwoId: string;
-  let timetableEntryId: string;
-  let splitEntryId: string;
   const academicYearId = { value: "" };
 
   beforeAll(async () => {
@@ -94,7 +103,7 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
     // period's hours. Period two is split — its first hour is the first teacher's,
     // its second the partner's, with a different subject — which is the shape that
     // has no single "the period's teacher" and no scope column to say so.
-    const [entry] = await db.insert(timetableEntries).values({
+    await db.insert(timetableEntries).values({
       schoolId: school.id, academicYearId: year.id, classroomId: classroom.id, periodId: periodOne.id,
       dayOfWeek: 1, hourIndex: 1, subjectId: subject.id, teacherMembershipId: teacherMembership.id,
     }).returning();
@@ -102,7 +111,7 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
       schoolId: school.id, academicYearId: year.id, classroomId: classroom.id, periodId: periodOne.id,
       dayOfWeek: 1, hourIndex: 2, subjectId: subject.id, teacherMembershipId: teacherMembership.id,
     });
-    const [split] = await db.insert(timetableEntries).values({
+    await db.insert(timetableEntries).values({
       schoolId: school.id, academicYearId: year.id, classroomId: classroom.id, periodId: periodTwo.id,
       dayOfWeek: 1, hourIndex: 1, subjectId: subject.id, teacherMembershipId: teacherMembership.id,
     }).returning();
@@ -116,27 +125,26 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
     classroomId = classroom.id;
     enrollmentId = enrollment[0].id;
     guardianId = guardian.id;
-    subjectId = subject.id;
     teacherMembershipId = teacherMembership.id;
     partnerMembershipId = partnerMembership.id;
     periodOneId = periodOne.id;
     periodTwoId = periodTwo.id;
-    timetableEntryId = entry.id;
-    splitEntryId = split.id;
   });
 
   it("persists one period session, attendance record, and notification intent", async () => {
-    await submitAttendanceForContext(context, { timetableEntryId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
+    await submitAttendanceForContext(context, { classroomId, periodId: periodOneId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
     const db = getDb();
     const sessions = await db.select().from(attendanceSessions).where(and(
       eq(attendanceSessions.schoolId, context.schoolId),
-      eq(attendanceSessions.timetableEntryId, timetableEntryId),
+      eq(attendanceSessions.classroomId, classroomId),
+      eq(attendanceSessions.periodId, periodOneId),
+      eq(attendanceSessions.businessDate, SATURDAY),
     ));
     expect(sessions).toHaveLength(1);
-    // The session names the subject, the responsible teacher, and the shift the
+    // The session names the period, the responsible teacher, and the shift the
     // school was actually in, so neither a report nor a past register has to
-    // re-derive any of them.
-    expect(sessions[0]).toMatchObject({ subjectId, teacherMembershipId, businessDate: SATURDAY, status: "OPEN", applicableShift: "MORNING" });
+    // re-derive any of them. A period one teacher holds outright names them.
+    expect(sessions[0]).toMatchObject({ teacherMembershipId, businessDate: SATURDAY, status: "OPEN", applicableShift: "MORNING" });
     expect(sessions[0].submissionDeadlineAt.getTime()).toBeGreaterThan(0);
 
     const [savedRecord] = await db.select().from(attendanceRecords).where(and(
@@ -153,8 +161,8 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
   });
 
   it("does not duplicate notification intent on repeated same-status submission", async () => {
-    await submitAttendanceForContext(context, { timetableEntryId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
-    await submitAttendanceForContext(context, { timetableEntryId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
+    await submitAttendanceForContext(context, { classroomId, periodId: periodOneId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
+    await submitAttendanceForContext(context, { classroomId, periodId: periodOneId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
     const outbox = await getDb().select().from(notificationOutbox).where(and(
       eq(notificationOutbox.schoolId, context.schoolId),
       eq(notificationOutbox.guardianId, guardianId),
@@ -162,42 +170,61 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
     expect(outbox).toHaveLength(1);
   });
 
-  it("keeps one session per teaching hour", async () => {
-    await submitAttendanceForContext(context, { timetableEntryId: splitEntryId, businessDate: SATURDAY, records: [{ enrollmentId, status: "ABSENT" }] });
+  it("keeps one register for a period, not one per hour", async () => {
+    await submitAttendanceForContext(context, { classroomId, periodId: periodTwoId, businessDate: SATURDAY, records: [{ enrollmentId, status: "ABSENT" }] });
     const sessions = await getDb().select().from(attendanceSessions).where(and(
       eq(attendanceSessions.schoolId, context.schoolId),
       eq(attendanceSessions.classroomId, classroomId),
       eq(attendanceSessions.businessDate, SATURDAY),
     ));
-    // Each teaching hour is its own register, so the two hours of one period are
-    // two sessions — which is what a period-level model could not express.
+    // Two periods of this class meet on Saturday and each is registered once, even
+    // though period two holds two hours with two teachers and two subjects.
     expect(sessions).toHaveLength(2);
+    const forSplit = sessions.filter((session) => session.periodId === periodTwoId);
+    expect(forSplit).toHaveLength(1);
   });
 
-  it("records the subject and teacher of the hour that was registered", async () => {
+  it("hands a split period to one teacher for the whole period, alternating weekly", async () => {
     const db = getDb();
-    // The split period's second hour belongs to the partner teacher and a different
-    // subject, so its register must name those rather than the period's first hour's.
-    const [secondHour] = await db.select().from(timetableEntries).where(and(
-      eq(timetableEntries.classroomId, classroomId),
-      eq(timetableEntries.periodId, periodTwoId),
-      eq(timetableEntries.hourIndex, 2),
-    ));
-    await submitAttendanceForContext(context, { timetableEntryId: secondHour.id, businessDate: SATURDAY, records: [{ enrollmentId, status: "LATE" }] });
-    const [session] = await db.select().from(attendanceSessions).where(and(
+    // The academic year opens on 2026-09-23, whose school week starts Saturday
+    // 2026-09-19. The week of 2026-11-21 is nine weeks on — an odd index — so it is
+    // the *second* teacher's week even though the first teacher holds the earlier
+    // hour. The following week is the first teacher's.
+    await submitAttendanceForContext(context, { classroomId, periodId: periodTwoId, businessDate: SATURDAY, records: [{ enrollmentId, status: "LATE" }] });
+    const [oddWeek] = await db.select().from(attendanceSessions).where(and(
       eq(attendanceSessions.schoolId, context.schoolId),
-      eq(attendanceSessions.timetableEntryId, secondHour.id),
+      eq(attendanceSessions.classroomId, classroomId),
+      eq(attendanceSessions.periodId, periodTwoId),
       eq(attendanceSessions.businessDate, SATURDAY),
     ));
-    expect(session.teacherMembershipId).toBe(partnerMembershipId);
-    expect(session.subjectId).toBe(secondHour.subjectId);
+    expect(oddWeek.teacherMembershipId).toBe(partnerMembershipId);
+
+    await submitAttendanceForContext(context, { classroomId, periodId: periodTwoId, businessDate: NEXT_SATURDAY, records: [{ enrollmentId, status: "PRESENT" }] });
+    const [evenWeek] = await db.select().from(attendanceSessions).where(and(
+      eq(attendanceSessions.schoolId, context.schoolId),
+      eq(attendanceSessions.classroomId, classroomId),
+      eq(attendanceSessions.periodId, periodTwoId),
+      eq(attendanceSessions.businessDate, NEXT_SATURDAY),
+    ));
+    expect(evenWeek.teacherMembershipId).toBe(teacherMembershipId);
+  });
+
+  it("refuses the other teacher of a split period in a week that is not theirs", async () => {
+    // A teacher context for the first teacher, submitting the split period in a week
+    // the rotation hands to the second teacher.
+    const teacherContext = { ...context, membershipId: teacherMembershipId, role: "TEACHER" as const };
+    await expect(submitAttendanceForContext(teacherContext, {
+      classroomId, periodId: periodTwoId, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }],
+    })).rejects.toThrow("دبیر مسئول همین هفته");
   });
 
   it("counts each assignment as one hour for its teacher", async () => {
     const report = await getTeacherHourReportForContext(context, academicYearId.value);
     const byTeacher = new Map(report.map((row) => [row.teacherMembershipId, row]));
     // Three hours name the first teacher (both hours of period one and the first of
-    // period two) and one names the partner, which is one hour per assignment.
+    // period two) and one names the partner, which is one hour per assignment. The
+    // weekly alternation of attendance responsibility does not move either figure:
+    // a teacher's hours are what they teach, not what they register.
     expect(byTeacher.get(teacherMembershipId)).toMatchObject({ assignedWeeklyHours: 3, requiredWeeklyHours: 3, difference: 0 });
     expect(byTeacher.get(partnerMembershipId)).toMatchObject({ assignedWeeklyHours: 1, requiredWeeklyHours: 1, difference: 0 });
   });
@@ -206,36 +233,29 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
     // Thursday is outside the configured Saturday-to-Wednesday week.
     expect(schoolDayOfWeek(THURSDAY)).toBe(6);
     await expect(submitAttendanceForContext(context, {
-      timetableEntryId, businessDate: THURSDAY, records: [{ enrollmentId, status: "PRESENT" }],
+      classroomId, periodId: periodOneId, businessDate: THURSDAY, records: [{ enrollmentId, status: "PRESENT" }],
     })).rejects.toThrow("روزهای فعالیت");
   });
 
-  it("refuses a date whose weekday does not match the entry", async () => {
+  it("refuses a date whose weekday the period is not scheduled on", async () => {
     // The entry is a Saturday period, so a Sunday date must not accept it even
-    // though Sunday is an operating day.
+    // though Sunday is an operating day. The refusal names the weekday, which is the
+    // fact that explains it, rather than the school's calendar.
     expect(schoolDayOfWeek("2026-11-22")).toBe(2);
     await expect(submitAttendanceForContext(context, {
-      timetableEntryId, businessDate: "2026-11-22", records: [{ enrollmentId, status: "PRESENT" }],
+      classroomId, periodId: periodOneId, businessDate: "2026-11-22", records: [{ enrollmentId, status: "PRESENT" }],
     })).rejects.toThrow("برگزار نمی‌شود");
   });
 
-  it("refuses an entry from another school", async () => {
+  it("refuses a period from another school", async () => {
     const db = getDb();
     const [otherSchool] = await db.insert(schools).values({ slug: `phase6-other-${crypto.randomUUID()}`, name: "Other" }).returning();
-    const [otherYear] = await db.insert(academicYears).values({ schoolId: otherSchool.id, code: "1405", name: "سال دیگر", startDate: "2026-09-23", endDate: "2027-06-21", status: "ACTIVE" }).returning();
-    const [otherGrade] = await db.insert(grades).values({ schoolId: otherSchool.id, code: "G1", name: "پایه" }).returning();
-    const [otherClassroom] = await db.insert(classrooms).values({ schoolId: otherSchool.id, academicYearId: otherYear.id, gradeId: otherGrade.id, code: "A", name: "کلاس" }).returning();
     const [otherPeriod] = await db.insert(schoolPeriods).values({ schoolId: otherSchool.id, ordinal: 1, startTime: "08:00:00", endTime: "10:00:00" }).returning();
-    const [otherTeacherUser] = await db.insert(users).values({ id: `phase6-foreign-${crypto.randomUUID()}`, name: "دبیر دیگر", email: `foreign-${crypto.randomUUID()}@example.com`, emailVerified: true }).returning();
-    const [otherMembership] = await db.insert(schoolMemberships).values({ schoolId: otherSchool.id, userId: otherTeacherUser.id, role: "TEACHER", status: "ACTIVE" }).returning();
-    const [otherSubject] = await db.insert(subjects).values({ schoolId: otherSchool.id, code: "MATH", name: "ریاضی" }).returning();
-    const [foreignEntry] = await db.insert(timetableEntries).values({
-      schoolId: otherSchool.id, academicYearId: otherYear.id, classroomId: otherClassroom.id, periodId: otherPeriod.id,
-      dayOfWeek: 1, hourIndex: 1, subjectId: otherSubject.id, teacherMembershipId: otherMembership.id,
-    }).returning();
 
+    // The period id belongs to another school, so it must not resolve to a slot
+    // here — the service looks the period up within this school and finds nothing.
     await expect(submitAttendanceForContext(context, {
-      timetableEntryId: foreignEntry.id, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }],
+      classroomId, periodId: otherPeriod.id, businessDate: SATURDAY, records: [{ enrollmentId, status: "PRESENT" }],
     })).rejects.toThrow("در دسترس نیست");
   });
 
@@ -245,6 +265,73 @@ describe.skipIf(!canRun)("persisted Phase 6 attendance", () => {
     expect(resolveApplicableShift(NEXT_SATURDAY, rotating)).toBe("AFTERNOON");
     // A fixed school never alternates.
     expect(resolveApplicableShift(SATURDAY, { shiftType: "AFTERNOON", rotationBaseDate: null })).toBe("AFTERNOON");
+  });
+
+  it("resolves the applicable shift for a rotating school week by week", () => {
+    const rotating = { shiftType: "ROTATING" as const, rotationBaseDate: SATURDAY };
+    expect(resolveApplicableShift(SATURDAY, rotating)).toBe("MORNING");
+    expect(resolveApplicableShift(NEXT_SATURDAY, rotating)).toBe("AFTERNOON");
+    // A fixed school never alternates.
+    expect(resolveApplicableShift(SATURDAY, { shiftType: "AFTERNOON", rotationBaseDate: null })).toBe("AFTERNOON");
+  });
+
+  it("measures a rotating school's deadline from the afternoon schedule in an afternoon week", async () => {
+    // A school that rotates needs its own fixtures: two shifts' times on the period,
+    // and the rotation anchored so the week under test is the afternoon one.
+    const db = getDb();
+    const [rotatingSchool] = await db.insert(schools).values({ slug: `phase6-rotating-${crypto.randomUUID()}`, name: "Rotating" }).returning();
+    const rotatingUserId = `phase6-rotating-admin-${crypto.randomUUID()}`;
+    await db.insert(users).values({ id: rotatingUserId, name: "مدیر چرخشی", email: `${rotatingUserId}@example.com`, emailVerified: true });
+    const [rotatingMembership] = await db.insert(schoolMemberships).values({ schoolId: rotatingSchool.id, userId: rotatingUserId, role: "SCHOOL_ADMIN", status: "ACTIVE" }).returning();
+    const [rotatingYear] = await db.insert(academicYears).values({ schoolId: rotatingSchool.id, code: "1405", name: "سال چرخشی", startDate: "2026-09-23", endDate: "2027-06-21", status: "ACTIVE" }).returning();
+    const [rotatingGrade] = await db.insert(grades).values({ schoolId: rotatingSchool.id, code: "G1", name: "پایه" }).returning();
+    const [rotatingClassroom] = await db.insert(classrooms).values({ schoolId: rotatingSchool.id, academicYearId: rotatingYear.id, gradeId: rotatingGrade.id, code: "A", name: "کلاس" }).returning();
+    const [rotatingStudent] = await db.insert(students).values({ schoolId: rotatingSchool.id, admissionNumber: "1", firstName: "رها", lastName: "چرخشی" }).returning();
+    const [rotatingEnrollment] = await db.insert(enrollments).values({ schoolId: rotatingSchool.id, studentId: rotatingStudent.id, academicYearId: rotatingYear.id, classroomId: rotatingClassroom.id, startDate: "2026-09-23" }).returning();
+    await db.insert(schoolOperatingDays).values([1, 2, 3, 4, 5].map((dayOfWeek) => ({ schoolId: rotatingSchool.id, dayOfWeek })));
+    // Noon opening, late-afternoon closing: the pair the deadline must follow.
+    await db.insert(schoolSettings).values({ schoolId: rotatingSchool.id, attendanceSubmissionMinutes: 30, shiftType: "ROTATING", rotationBaseDate: SATURDAY });
+    const [rotatingPeriod] = await db.insert(schoolPeriods).values({
+      schoolId: rotatingSchool.id, ordinal: 1, startTime: "07:00:00", endTime: "09:00:00",
+      afternoonStartTime: "14:00:00", afternoonEndTime: "16:00:00",
+    }).returning();
+    const rotatingSubject = (await db.insert(subjects).values({ schoolId: rotatingSchool.id, code: "MATH", name: "ریاضی" }).returning())[0];
+    const rotatingTeacherUser = `phase6-rotating-teacher-${crypto.randomUUID()}`;
+    await db.insert(users).values({ id: rotatingTeacherUser, name: "دبیر چرخشی", email: `${rotatingTeacherUser}@example.com`, emailVerified: true });
+    const [rotatingTeacher] = await db.insert(schoolMemberships).values({ schoolId: rotatingSchool.id, userId: rotatingTeacherUser, role: "TEACHER", status: "ACTIVE" }).returning();
+    await db.insert(timetableEntries).values([
+      { schoolId: rotatingSchool.id, academicYearId: rotatingYear.id, classroomId: rotatingClassroom.id, periodId: rotatingPeriod.id, dayOfWeek: 1, hourIndex: 1, subjectId: rotatingSubject.id, teacherMembershipId: rotatingTeacher.id },
+      { schoolId: rotatingSchool.id, academicYearId: rotatingYear.id, classroomId: rotatingClassroom.id, periodId: rotatingPeriod.id, dayOfWeek: 1, hourIndex: 2, subjectId: rotatingSubject.id, teacherMembershipId: rotatingTeacher.id },
+    ]);
+    const rotatingContext = { membershipId: rotatingMembership.id, schoolId: rotatingSchool.id, userId: rotatingUserId, role: "SCHOOL_ADMIN" as const, school: rotatingSchool };
+
+    // NEXT_SATURDAY is an afternoon week for this anchor, so the period ends at 16:00
+    // and the deadline lands 30 minutes later — not the 09:30 the morning pair would
+    // have produced.
+    await submitAttendanceForContext(rotatingContext, {
+      classroomId: rotatingClassroom.id, periodId: rotatingPeriod.id, businessDate: NEXT_SATURDAY,
+      records: [{ enrollmentId: rotatingEnrollment.id, status: "PRESENT" }],
+    });
+    const [afternoonSession] = await db.select().from(attendanceSessions).where(and(
+      eq(attendanceSessions.schoolId, rotatingSchool.id),
+      eq(attendanceSessions.periodId, rotatingPeriod.id),
+      eq(attendanceSessions.businessDate, NEXT_SATURDAY),
+    ));
+    expect(afternoonSession.applicableShift).toBe("AFTERNOON");
+    expect(formatSchoolDeadline(afternoonSession.submissionDeadlineAt, rotatingSchool.timezone)).toBe("16:30");
+
+    // The morning week's register, by contrast, follows the morning pair.
+    await submitAttendanceForContext(rotatingContext, {
+      classroomId: rotatingClassroom.id, periodId: rotatingPeriod.id, businessDate: SATURDAY,
+      records: [{ enrollmentId: rotatingEnrollment.id, status: "PRESENT" }],
+    });
+    const [morningSession] = await db.select().from(attendanceSessions).where(and(
+      eq(attendanceSessions.schoolId, rotatingSchool.id),
+      eq(attendanceSessions.periodId, rotatingPeriod.id),
+      eq(attendanceSessions.businessDate, SATURDAY),
+    ));
+    expect(morningSession.applicableShift).toBe("MORNING");
+    expect(formatSchoolDeadline(morningSession.submissionDeadlineAt, rotatingSchool.timezone)).toBe("09:30");
   });
 
   it("keeps the school week numbering the timetable is built on", () => {

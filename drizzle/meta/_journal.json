@@ -92,6 +92,20 @@
       "when": 1797200000005,
       "tag": "0012_phase6_hour_slots",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1797200000006,
+      "tag": "0013_phase6_period_attendance",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1797200000007,
+      "tag": "0014_phase6_shift_period_times",
+      "breakpoints": true
     }
   ]
 }

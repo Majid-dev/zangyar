@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  academicWeekIndex,
+  academicWeekNumber,
   isMorningRotationWeek,
   isSchoolOperatingDay,
   resolveApplicableShift,
+  resolveAttendanceRotationTeacher,
+  resolvePeriodTimes,
   schoolDayOfWeek,
   schoolWeekStart,
   summarizeTeacherHours,
@@ -127,5 +131,93 @@ describe("summarizeTeacherHours", () => {
   it("reports a teacher who has a requirement but no assignments", () => {
     const [row] = summarizeTeacherHours([], new Map([["t1", 6]]));
     expect(row).toMatchObject({ teacherMembershipId: "t1", assignedWeeklyHours: 0, requiredWeeklyHours: 6, difference: -6 });
+  });
+});
+
+describe("academicWeekIndex", () => {
+  it("counts whole school weeks from the academic year's own first week", () => {
+    // 2026-09-23 is a Wednesday, so the opening school week begins Saturday
+    // 2026-09-19 — the anchor is snapped to the week the year opens in.
+    expect(academicWeekIndex("2026-09-23", "2026-09-19")).toBe(0);
+    expect(academicWeekIndex("2026-09-23", "2026-09-23")).toBe(0);
+    expect(academicWeekIndex("2026-09-23", "2026-09-26")).toBe(1);
+    expect(academicWeekIndex("2026-09-23", "2026-11-21")).toBe(9);
+  });
+
+  it("does not reset at a calendar year boundary", () => {
+    // A year crossing into January keeps counting: 1405 opens in September, so by
+    // January the index is large and positive rather than wrapping to zero. This is
+    // the reset the school week numbering is chosen to avoid.
+    const acrossNewYear = academicWeekIndex("2026-09-23", "2027-01-09");
+    expect(acrossNewYear).toBeGreaterThan(15);
+    // Parity is preserved across the boundary: two weeks apart share a parity.
+    expect(academicWeekIndex("2026-09-23", "2027-01-23") - acrossNewYear).toBe(2);
+  });
+
+  it("is negative before the year opens, so dates earlier still alternate in step", () => {
+    // 2026-09-12 and 2026-09-05 are the two Saturdays before the year opens. Their
+    // negative indices keep the same parity the pattern has after the anchor.
+    expect(academicWeekIndex("2026-09-23", "2026-09-12")).toBe(-1);
+    expect(academicWeekIndex("2026-09-23", "2026-09-05")).toBe(-2);
+  });
+
+  it("numbers weeks from one for the interface", () => {
+    expect(academicWeekNumber("2026-09-23", "2026-09-19")).toBe(1);
+    expect(academicWeekNumber("2026-09-23", "2026-11-21")).toBe(10);
+  });
+});
+
+describe("resolveAttendanceRotationTeacher", () => {
+  const rotation = { baseTeacherMembershipId: "first", partnerTeacherMembershipId: "second" };
+
+  it("gives the base week to the teacher who holds the period's first hour", () => {
+    expect(resolveAttendanceRotationTeacher(rotation, "2026-09-23", "2026-09-19")).toBe("first");
+    expect(resolveAttendanceRotationTeacher(rotation, "2026-09-23", "2026-09-26")).toBe("second");
+  });
+
+  it("alternates every week and keeps the whole week with one teacher", () => {
+    // Every day of one school week resolves to the same teacher, so the period is
+    // never split between the two within a week.
+    for (const date of ["2026-11-21", "2026-11-22", "2026-11-25"]) {
+      expect(resolveAttendanceRotationTeacher(rotation, "2026-09-23", date)).toBe("second");
+    }
+    expect(resolveAttendanceRotationTeacher(rotation, "2026-09-23", "2026-11-28")).toBe("first");
+  });
+
+  it("returns null for a period that does not alternate", () => {
+    expect(resolveAttendanceRotationTeacher(null, "2026-09-23", "2026-11-21")).toBeNull();
+  });
+
+  it("alternates backwards from the anchor rather than inverting", () => {
+    // One week before the year opens is the partner's, two weeks before is the
+    // base teacher's — the same order the pattern continues forward.
+    expect(resolveAttendanceRotationTeacher(rotation, "2026-09-23", "2026-09-12")).toBe("second");
+    expect(resolveAttendanceRotationTeacher(rotation, "2026-09-23", "2026-09-05")).toBe("first");
+  });
+});
+
+describe("resolvePeriodTimes", () => {
+  const rotatingPeriod = {
+    startTime: "08:00:00",
+    endTime: "10:00:00",
+    afternoonStartTime: "13:00:00",
+    afternoonEndTime: "15:00:00",
+  };
+
+  it("uses the shift the date is in", () => {
+    expect(resolvePeriodTimes(rotatingPeriod, "MORNING")).toEqual({ startTime: "08:00:00", endTime: "10:00:00" });
+    expect(resolvePeriodTimes(rotatingPeriod, "AFTERNOON")).toEqual({ startTime: "13:00:00", endTime: "15:00:00" });
+  });
+
+  it("falls back to the opening times when no afternoon schedule is stated", () => {
+    // A rotating school that has not entered an afternoon schedule runs the opening
+    // one rather than an undefined set of times.
+    const noAfternoon = { ...rotatingPeriod, afternoonStartTime: null, afternoonEndTime: null };
+    expect(resolvePeriodTimes(noAfternoon, "AFTERNOON")).toEqual({ startTime: "08:00:00", endTime: "10:00:00" });
+  });
+
+  it("is indifferent to the shift for a fixed school", () => {
+    const fixed = { startTime: "08:00:00", endTime: "10:00:00", afternoonStartTime: null, afternoonEndTime: null };
+    expect(resolvePeriodTimes(fixed, "MORNING")).toEqual(resolvePeriodTimes(fixed, "AFTERNOON"));
   });
 });

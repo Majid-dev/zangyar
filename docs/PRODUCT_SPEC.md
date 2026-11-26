@@ -71,18 +71,22 @@ A school-owned contact record associated with one or more students. A guardian m
 - For a rotating shift, configure a reference date that determines the rotation week, and calculate the applicable shift for any date from it.
 - Configure the school's operating weekdays.
 - Configure the school day as an ordered list of periods, each with a start and end time. A period is naturally two hours, and breaks are the gaps between periods rather than configured rows.
+- For a rotating shift, give each period its own afternoon start and end time as well, so the two shifts run genuinely different daily schedules; a fixed shift shows and configures only its own times.
+- Default the rotation reference date to the academic year's start date, editable by the admin.
+- Preselect Saturday through Wednesday as the operating days for a school that has never saved a week, leaving Thursday and Friday unchecked.
 - Assign a teacher and a subject to one teaching hour of a period, or to both of its hours at once.
 - Support a period whose two hours are two different lessons with two different teachers and subjects.
 - Record each teacher's mandatory weekly hours for an academic year, as part of approving them and editable afterwards.
 - Report assigned against required hours.
 - Refuse timetable assignment to a teacher whose mandatory hours are unset or zero, to a teacher who already teaches a selected hour in another classroom, and to an assignment that would take a teacher past their mandatory hours.
-- Refuse attendance on a non-operating day, on a date whose weekday does not match the assigned period, and outside the applicable school shift.
+- Refuse attendance on a non-operating day, on a date whose weekday does not match the assigned period, outside the applicable school shift, and by a teacher the week's rotation does not name for a split period.
+- Calculate attendance availability and submission deadlines from the period's times in the shift the school is actually in on the date, applying the grace period after that shift's period end.
 
 ### Attendance
 
-- Record attendance per teaching hour, for a classroom, subject, and school-local business date.
+- Record attendance per period, for a classroom and school-local business date. For a period split between two teachers, one teacher records the entire period, alternating weekly from the academic year's start date.
 - Support statuses: `PRESENT`, `ABSENT`, `LATE`, and `EXCUSED`.
-- Ensure at most one attendance session per timetable slot and date.
+- Ensure at most one attendance session per classroom period and date.
 - Ensure one attendance record per enrolled student per session.
 - Permit same-day teacher corrections for periods they teach.
 - Permit School Admin corrections for any school date.
@@ -173,7 +177,7 @@ A school-owned contact record associated with one or more students. A guardian m
 6. Teachers can access only assigned classrooms unless authorized as School Admin; a School Admin membership is not also a Teacher membership.
 7. Historical academic-year records remain available after closure.
 8. Classroom transfers create effective-dated enrollment history with no overlapping enrollments for the same student and academic year.
-9. Attendance is unique by school, timetable slot, and local date.
+9. Attendance is unique by school, classroom, period, and local date.
 10. Attendance records reference valid enrollments from the same school and classroom and must fall within the enrollment's effective period.
 11. School Admins configure attendance notification triggers from the admin panel.
 12. Attendance submission never waits for SMS delivery.

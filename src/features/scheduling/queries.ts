@@ -17,7 +17,7 @@ import {
   timetableEntries,
   users,
 } from "@/lib/db/schema";
-import { summarizeTeacherHours, type TeacherHourSummary } from "./week";
+import { summarizeTeacherHours, DEFAULT_OPERATING_DAYS, type TeacherHourSummary } from "./week";
 
 /**
  * The school's timetable shape: its shift, its rotation anchor, and the weekdays
@@ -25,28 +25,47 @@ import { summarizeTeacherHours, type TeacherHourSummary } from "./week";
  *
  * Read as one object because callers always need all three together — a page that
  * knows the shift but not the operating days cannot say whether a date is
- * schedulable, and the shift resolution itself takes the pair.
+ * schedulable, and the shift resolution itself takes the pair. `activeAcademicYearStartDate`
+ * is carried alongside because it is the default the rotation anchor falls back to
+ * when a rotating school has not chosen one.
  */
 export type SchoolTimetableSettings = {
   shiftType: "MORNING" | "AFTERNOON" | "ROTATING";
   rotationBaseDate: string | null;
   operatingDays: number[];
+  /** Whether the school has actually saved a week, as opposed to being shown the default. */
+  operatingDaysConfigured: boolean;
   attendanceSubmissionMinutes: number;
+  activeAcademicYearStartDate: string | null;
 };
 
 export async function getSchoolTimetableSettings(context: ActiveSchoolMembership): Promise<SchoolTimetableSettings> {
   const [settings] = await getDb().select().from(schoolSettings).where(eq(schoolSettings.schoolId, context.schoolId)).limit(1);
-  const days = await getDb().select({ dayOfWeek: schoolOperatingDays.dayOfWeek }).from(schoolOperatingDays)
-    .where(eq(schoolOperatingDays.schoolId, context.schoolId))
-    .orderBy(asc(schoolOperatingDays.dayOfWeek));
+  const [days, activeYears] = await Promise.all([
+    getDb().select({ dayOfWeek: schoolOperatingDays.dayOfWeek }).from(schoolOperatingDays)
+      .where(eq(schoolOperatingDays.schoolId, context.schoolId))
+      .orderBy(asc(schoolOperatingDays.dayOfWeek)),
+    getDb().select({ startDate: academicYears.startDate }).from(academicYears)
+      .where(and(eq(academicYears.schoolId, context.schoolId), eq(academicYears.status, "ACTIVE")))
+      .limit(1),
+  ]);
+  const [activeYear] = activeYears;
   return {
     // A school that has never opened the settings page has no row; defaulting to a
-    // morning week with no operating days is what makes the first save a real save
-    // rather than a no-op against a phantom configuration.
+    // morning week is what makes the first save a real save rather than a no-op
+    // against a phantom configuration.
     shiftType: settings?.shiftType ?? "MORNING",
     rotationBaseDate: settings?.rotationBaseDate ?? null,
-    operatingDays: days.map((row) => row.dayOfWeek),
+    // No saved operating days means the school has not chosen its week yet, so the
+    // ordinary Saturday-to-Wednesday week is offered pre-checked. A school that has
+    // saved a week keeps exactly what it saved — the operating-day schema requires
+    // at least one day, so an empty set can only ever mean "never configured". The
+    // two are reported separately because a caller that needs to know whether the
+    // school is *open* must not be satisfied by the default it is merely being shown.
+    operatingDays: days.length > 0 ? days.map((row) => row.dayOfWeek) : [...DEFAULT_OPERATING_DAYS],
+    operatingDaysConfigured: days.length > 0,
     attendanceSubmissionMinutes: settings?.attendanceSubmissionMinutes ?? 0,
+    activeAcademicYearStartDate: activeYear?.startDate ?? null,
   };
 }
 
@@ -268,6 +287,11 @@ export async function getTimetableGridForContext(
       ordinal: period.ordinal,
       startTime: period.startTime,
       endTime: period.endTime,
+      // The grid is a week's template rather than one shift's day, so a rotating
+      // school's header shows both shifts' times; a fixed school's is null and only
+      // the opening pair is drawn.
+      afternoonStartTime: period.afternoonStartTime,
+      afternoonEndTime: period.afternoonEndTime,
     })),
     subjects: subjectRows,
     teachers: gridAssignable,

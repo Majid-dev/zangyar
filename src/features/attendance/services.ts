@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { requireSchoolAccess, type ActiveSchoolMembership } from "@/lib/auth/authorization";
@@ -21,7 +21,7 @@ import {
   timetableEntries,
 } from "@/lib/db/schema";
 import { listEffectiveClassroomStudentsForContext } from "@/features/students/queries";
-import { resolveApplicableShift, schoolDayOfWeek } from "@/features/scheduling/week";
+import { resolveApplicableShift, resolveAttendanceRotationTeacher, resolvePeriodTimes, schoolDayOfWeek } from "@/features/scheduling/week";
 
 import { submitAttendanceSchema, type SubmitAttendanceInput } from "./schema";
 
@@ -127,12 +127,22 @@ export async function submitAttendanceForContext(
   }
 
   return getDb().transaction(async (tx) => {
-    const [row] = await tx.select({
+    // The period's hours are read together, because the register is for the period
+    // and the responsible teacher is a property of the two of them: one teacher
+    // owns the whole period whichever week it is theirs, and a split period hands
+    // between its two teachers. Reading only one hour could not tell a split period
+    // from a single-teacher one.
+    //
+    // The rows are read without filtering on the submitted date's weekday, so the
+    // refusals below can be ordered the way they read: whether the period exists at
+    // all, then whether the school is open that day, then whether the period is
+    // scheduled on it. Filtering by weekday here would collapse the first and third
+    // into one "not found", which is the least useful of the three answers.
+    const rows = await tx.select({
       entry: timetableEntries,
       period: schoolPeriods,
       classroom: classrooms,
       academicYear: academicYears,
-      subject: subjects,
     }).from(timetableEntries)
       .innerJoin(schoolPeriods, and(
         eq(schoolPeriods.id, timetableEntries.periodId),
@@ -140,14 +150,17 @@ export async function submitAttendanceForContext(
       ))
       .innerJoin(classrooms, and(eq(classrooms.id, timetableEntries.classroomId), eq(classrooms.schoolId, context.schoolId)))
       .innerJoin(academicYears, and(eq(academicYears.id, timetableEntries.academicYearId), eq(academicYears.schoolId, context.schoolId)))
-      .innerJoin(subjects, and(eq(subjects.id, timetableEntries.subjectId), eq(subjects.schoolId, context.schoolId)))
       .where(and(
-        eq(timetableEntries.id, input.timetableEntryId),
+        eq(timetableEntries.classroomId, input.classroomId),
+        eq(timetableEntries.periodId, input.periodId),
         eq(timetableEntries.schoolId, context.schoolId),
         eq(timetableEntries.status, "ACTIVE"),
       ))
-      .limit(1);
-    if (!row) throw new Error("زنگ انتخاب‌شده برای این مدرسه در دسترس نیست.");
+      .orderBy(asc(timetableEntries.hourIndex));
+    const [first] = rows;
+    if (!first) throw new Error("زنگ انتخاب‌شده برای این مدرسه در دسترس نیست.");
+
+    const row = { classroom: first.classroom, academicYear: first.academicYear, period: first.period };
     if (row.classroom.status !== "ACTIVE" || row.academicYear.status === "CLOSED" || row.academicYear.status === "ARCHIVED") {
       throw new Error("کلاس یا سال تحصیلی انتخاب‌شده برای ثبت حضور در دسترس نیست.");
     }
@@ -157,18 +170,19 @@ export async function submitAttendanceForContext(
     const operatingDays = await tx.select({ dayOfWeek: schoolOperatingDays.dayOfWeek }).from(schoolOperatingDays)
       .where(eq(schoolOperatingDays.schoolId, context.schoolId));
     const operatingDayList = operatingDays.map((day) => day.dayOfWeek);
+    const submittedDayOfWeek = schoolDayOfWeek(input.businessDate);
 
     // The operating week is checked before the period's own weekday: "the school is
     // closed that day" is the fact that explains the refusal, and reporting a
     // weekday mismatch instead would send the admin looking at the timetable for a
     // problem that is really in the school's calendar.
-    if (!operatingDayList.includes(schoolDayOfWeek(input.businessDate))) {
+    if (!operatingDayList.includes(submittedDayOfWeek)) {
       throw new Error("این تاریخ در روزهای فعالیت مدرسه نیست.");
     }
 
-    // The weekday the entry names and the weekday the date actually is must agree,
-    // or a Tuesday's register could be written into Thursday's period.
-    if (row.entry.dayOfWeek !== schoolDayOfWeek(input.businessDate)) {
+    // The period is scheduled on one weekday, and the date must fall on it, or a
+    // Tuesday's register could be written into Thursday's period.
+    if (first.entry.dayOfWeek !== submittedDayOfWeek) {
       throw new Error("این زنگ در روز انتخاب‌شده برگزار نمی‌شود.");
     }
 
@@ -180,38 +194,62 @@ export async function submitAttendanceForContext(
       rotationBaseDate: settings?.rotationBaseDate ?? null,
     });
 
-    // The assignment names one teacher, because it is one hour of one period, so
-    // responsibility is read rather than resolved: a period whose two hours belong
-    // to two people is two assignments, and each register names its own teacher.
-    const teacherMembershipId = row.entry.teacherMembershipId;
-    if (context.role === "TEACHER" && teacherMembershipId !== context.membershipId) {
-      throw new Error("این زنگ به شما تخصیص نیافته است.");
+    // Who owes this period this week. A period whose hours name one teacher is
+    // always theirs; a split one alternates from the academic year's first day, and
+    // the week names exactly one of the two.
+    const teacherIds = [...new Set(rows.map((entryRow) => entryRow.entry.teacherMembershipId))];
+    const rotates = teacherIds.length === 2;
+    const responsibleTeacherId = resolveAttendanceRotationTeacher(
+      rotates ? { baseTeacherMembershipId: teacherIds[0], partnerTeacherMembershipId: teacherIds[1] } : null,
+      row.academicYear.startDate,
+      input.businessDate,
+    ) ?? teacherIds[0];
+    // A teacher may submit only the week the rotation names them for. The other
+    // teacher in a split period is refused while it is not their week, which is
+    // what makes the alternation a rule rather than a convention.
+    if (context.role === "TEACHER" && responsibleTeacherId !== context.membershipId) {
+      throw new Error(rotates
+        ? "این زنگ در این هفته به شما تخصیص نیافته است؛ ثبت حضور آن با دبیر مسئول همین هفته است."
+        : "این زنگ به شما تخصیص نیافته است.");
     }
+    const teacherMembershipId = responsibleTeacherId;
 
+    // The deadline is measured from the end of the period *in the shift this date
+    // falls in*: a rotating school's afternoon period can end at a different time
+    // from its morning one, and a late register must not be judged against the other
+    // shift's clock. The grace period is applied after that actual end time.
+    const periodTimes = resolvePeriodTimes(row.period, applicableShiftValue);
     const submissionDeadlineAt = addMinutes(
-      schoolLocalDateTimeToInstant(input.businessDate, row.period.endTime, context.school.timezone),
+      schoolLocalDateTimeToInstant(input.businessDate, periodTimes.endTime, context.school.timezone),
       settings?.attendanceSubmissionMinutes ?? 0,
     );
     const blocker = occurrenceBlocker(context, { operatingDays: operatingDayList, submissionDeadlineAt, now });
     if (blocker) throw new Error(blocker);
+
+    // The period's lessons, for the notification text. A split period has two, which
+    // is why this is a list rather than a single name.
+    const subjectRows = await tx.select({ name: subjects.name }).from(subjects).where(and(
+      eq(subjects.schoolId, context.schoolId),
+      inArray(subjects.id, [...new Set(rows.map((entryRow) => entryRow.entry.subjectId))]),
+    ));
+    const subjectNames = subjectRows.map((subjectRow) => subjectRow.name);
 
     const [session] = await tx.insert(attendanceSessions).values({
       schoolId: context.schoolId,
       classroomId: row.classroom.id,
       academicYearId: row.academicYear.id,
       businessDate: input.businessDate,
-      timetableEntryId: row.entry.id,
-      subjectId: row.subject.id,
+      periodId: row.period.id,
       teacherMembershipId,
       applicableShift: applicableShiftValue,
       createdByMembershipId: context.membershipId,
       submissionDeadlineAt,
     }).onConflictDoUpdate({
-      // A retry of the same occurrence reuses its session. The deadline is
-      // rewritten because it is a function of the same period and policy, so
-      // recomputing it changes nothing a teacher could have relied on.
-      target: [attendanceSessions.schoolId, attendanceSessions.timetableEntryId, attendanceSessions.businessDate],
-      set: { submissionDeadlineAt, updatedAt: new Date() },
+      // A retry of the same occurrence reuses its session. The responsible teacher
+      // follows the week rather than the row, so it is rewritten too — a submission
+      // in a later week is that week's teacher's, not the first one's.
+      target: [attendanceSessions.schoolId, attendanceSessions.classroomId, attendanceSessions.periodId, attendanceSessions.businessDate],
+      set: { teacherMembershipId, submissionDeadlineAt, updatedAt: new Date() },
     }).returning();
     if (!session) throw new Error("ثبت جلسه حضور و غیاب انجام نشد.");
 
@@ -258,7 +296,7 @@ export async function submitAttendanceForContext(
             previousStatus: previous.status,
             status: record.status,
             businessDate: input.businessDate,
-            timetableEntryId: row.entry.id,
+            periodId: row.period.id,
             periodOrdinal: row.period.ordinal,
           },
         });
@@ -271,7 +309,9 @@ export async function submitAttendanceForContext(
         savedRecord,
         rosterStudent.student.id,
         `${rosterStudent.student.firstName} ${rosterStudent.student.lastName}`,
-        row.subject.name,
+        // The register is for the period, and a split period holds two subjects, so
+        // the message names them together rather than picking one of the two.
+        subjectNames.join(" / "),
         input.businessDate,
         settings,
       );

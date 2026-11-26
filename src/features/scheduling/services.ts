@@ -1,13 +1,12 @@
 import "server-only";
 
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { requireSchoolRole, type ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getDb } from "@/lib/db";
 import {
   academicYears,
-  attendanceRecords,
   attendanceSessions,
   classrooms,
   schoolMemberships,
@@ -166,9 +165,15 @@ function parseShiftSettings(input: SchoolShiftSettingsInput) {
  *
  * The ordinal is assigned here rather than accepted, because the ordering is the
  * day's own structure and not an administrator's input: a new period goes after
- * the last one, and an edit keeps its position. Overlap is refused outright — a
- * period's end has to precede the next one's start — so the submission deadline,
- * which is measured from a period's end, always refers to one period.
+ * the last one, and an edit keeps its position.
+ *
+ * Overlap is refused per shift rather than across the whole day, because the two
+ * shifts are separate schedules that may share clock times: a morning period and an
+ * afternoon period have no reason to avoid each other's times, and a school whose
+ * afternoon week runs 13:00–15:00 alongside a morning week's 13:00–15:00 is not in
+ * conflict with itself. Each pair is checked against the same pair of every other
+ * period, so a period's end still precedes the next one's start within the shift
+ * the deadline is measured in.
  */
 export async function upsertPeriod(options: { headers: Headers; input: UpsertPeriodInput }) {
   const context = await requireSchedulingAdmin(options.headers);
@@ -178,15 +183,27 @@ export async function upsertPeriod(options: { headers: Headers; input: UpsertPer
     const existingPeriods = await tx.select().from(schoolPeriods).where(eq(schoolPeriods.schoolId, context.schoolId))
       .orderBy(asc(schoolPeriods.ordinal));
 
-    const conflicting = existingPeriods.find((period) => period.id !== input.periodId
-      && input.startTime < period.endTime && period.startTime < input.endTime);
-    if (conflicting) throw new Error(`این بازه زمانی با زنگ ${conflicting.ordinal} هم‌پوشانی دارد.`);
+    const others = existingPeriods.filter((period) => period.id !== input.periodId);
+    const openingConflict = others.find((period) => input.startTime < period.endTime && period.startTime < input.endTime);
+    if (openingConflict) throw new Error(`این بازه زمانی با زنگ ${openingConflict.ordinal} در نوبت اول هم‌پوشانی دارد.`);
+    if (input.afternoonStartTime && input.afternoonEndTime) {
+      const afternoonConflict = others.find((period) => period.afternoonStartTime && period.afternoonEndTime
+        && input.afternoonStartTime! < period.afternoonEndTime && period.afternoonStartTime < input.afternoonEndTime!);
+      if (afternoonConflict) throw new Error(`این بازه زمانی با زنگ ${afternoonConflict.ordinal} در نوبت بعدازظهر هم‌پوشانی دارد.`);
+    }
+
+    const values = {
+      startTime: input.startTime,
+      endTime: input.endTime,
+      afternoonStartTime: input.afternoonStartTime ?? null,
+      afternoonEndTime: input.afternoonEndTime ?? null,
+    };
 
     if (input.periodId) {
       const existing = existingPeriods.find((period) => period.id === input.periodId);
       if (!existing) throw new Error("زنگ انتخاب‌شده پیدا نشد.");
       const [period] = await tx.update(schoolPeriods)
-        .set({ startTime: input.startTime, endTime: input.endTime, updatedAt: new Date() })
+        .set({ ...values, updatedAt: new Date() })
         .where(and(eq(schoolPeriods.id, existing.id), eq(schoolPeriods.schoolId, context.schoolId)))
         .returning();
       await writeAuditEvent(tx, {
@@ -196,7 +213,7 @@ export async function upsertPeriod(options: { headers: Headers; input: UpsertPer
         action: "SCHOOL_PERIOD_UPDATED",
         entityType: "SCHOOL_PERIOD",
         entityId: period.id,
-        metadata: { ordinal: period.ordinal, startTime: period.startTime, endTime: period.endTime },
+        metadata: { ordinal: period.ordinal, ...values },
       });
       return period;
     }
@@ -205,8 +222,7 @@ export async function upsertPeriod(options: { headers: Headers; input: UpsertPer
     const [period] = await tx.insert(schoolPeriods).values({
       schoolId: context.schoolId,
       ordinal: nextOrdinal,
-      startTime: input.startTime,
-      endTime: input.endTime,
+      ...values,
     }).returning();
     await writeAuditEvent(tx, {
       schoolId: context.schoolId,
@@ -215,7 +231,7 @@ export async function upsertPeriod(options: { headers: Headers; input: UpsertPer
       action: "SCHOOL_PERIOD_CREATED",
       entityType: "SCHOOL_PERIOD",
       entityId: period.id,
-      metadata: { ordinal: period.ordinal, startTime: period.startTime, endTime: period.endTime },
+      metadata: { ordinal: period.ordinal, ...values },
     });
     return period;
   });
@@ -601,32 +617,4 @@ export async function setTeacherWeeklyHours(options: { headers: Headers; input: 
     });
     return requirement;
   });
-}
-
-/**
- * How many attendance records each of the given assignments already holds.
- *
- * Exposed for the interface's clear action: an assignment whose register already
- * has records is history, and the admin confirming a clear should be told which
- * cells that applies to rather than discovering it afterwards. Kept as a query
- * rather than folded into the clear transaction because the answer is advisory —
- * the archive itself is unconditional, and the database is still the authority on
- * what exists.
- */
-export async function listTimetableEntrySessionCounts(context: ActiveSchoolMembership, entryIds: readonly string[]) {
-  if (entryIds.length === 0) return new Map<string, number>();
-  const rows = await getDb().select({
-    entryId: attendanceSessions.timetableEntryId,
-    records: sql<number>`count(${attendanceRecords.id})`,
-  }).from(attendanceSessions)
-    .leftJoin(attendanceRecords, and(
-      eq(attendanceRecords.attendanceSessionId, attendanceSessions.id),
-      eq(attendanceRecords.schoolId, context.schoolId),
-    ))
-    .where(and(
-      eq(attendanceSessions.schoolId, context.schoolId),
-      inArray(attendanceSessions.timetableEntryId, [...entryIds]),
-    ))
-    .groupBy(attendanceSessions.timetableEntryId);
-  return new Map(rows.map((row) => [row.entryId, Number(row.records)]));
 }

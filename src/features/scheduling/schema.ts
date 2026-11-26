@@ -76,14 +76,36 @@ export const schoolShiftSettingsSchema = z.object({
  * described by when it starts and ends. Breaks are not configured at all — the gap
  * between one period's end and the next one's start is the break — which is why
  * this carries only times.
+ *
+ * `startTime`/`endTime` are the opening shift's times, and `afternoonStartTime`/
+ * `afternoonEndTime` are optional and belong to a rotating school's afternoon
+ * weeks. The afternoon pair is required together or not at all, so the form cannot
+ * leave a half-entered afternoon schedule behind for the server to interpret, and
+ * the ordering of each pair is checked here so a sentence explains it rather than a
+ * database constraint.
  */
 export const upsertPeriodSchema = z.object({
   periodId: uuid.nullable().optional(),
   startTime: time,
   endTime: time,
+  afternoonStartTime: time.nullable().optional(),
+  afternoonEndTime: time.nullable().optional(),
 }).superRefine((value, context) => {
   if (value.startTime >= value.endTime) {
     context.addIssue({ code: "custom", path: ["endTime"], message: "ساعت پایان باید بعد از ساعت شروع باشد." });
+  }
+  const hasAfternoonStart = Boolean(value.afternoonStartTime);
+  const hasAfternoonEnd = Boolean(value.afternoonEndTime);
+  if (hasAfternoonStart !== hasAfternoonEnd) {
+    context.addIssue({
+      code: "custom",
+      path: [hasAfternoonStart ? "afternoonEndTime" : "afternoonStartTime"],
+      message: "برای نوبت بعدازظهر، ساعت شروع و پایان هر دو لازم است.",
+    });
+    return;
+  }
+  if (hasAfternoonStart && hasAfternoonEnd && value.afternoonStartTime! >= value.afternoonEndTime!) {
+    context.addIssue({ code: "custom", path: ["afternoonEndTime"], message: "ساعت پایان نوبت بعدازظهر باید بعد از شروع آن باشد." });
   }
 });
 

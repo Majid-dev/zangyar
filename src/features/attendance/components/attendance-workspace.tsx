@@ -14,15 +14,22 @@ import { toPersianDigits } from "@/lib/jalali";
 type AttendanceStatus = "PRESENT" | "ABSENT" | "LATE" | "EXCUSED";
 type WorkspaceStudent = { id: string; enrollmentId: string; name: string; code: string };
 type WorkspaceSlot = {
-  timetableEntryId: string;
   classroomId: string;
   classroomName: string;
-  subjectName: string;
+  /** One lesson name, or two when the period is split between two subjects. */
+  subjectNames: string[];
   shiftName: string;
+  periodId: string;
   periodLabel: string;
   periodOrdinal: number;
   startTime: string;
   endTime: string;
+  teacherMembershipId: string;
+  teacherName: string;
+  partnerTeacherMembershipId: string | null;
+  partnerTeacherName: string | null;
+  rotates: boolean;
+  academicWeekNumber: number;
   sessionId: string | null;
   sessionStatus: "OPEN" | "CLOSED" | null;
   submissionDeadlineAt: string | Date | null;
@@ -56,7 +63,7 @@ function clock(time: string) {
  * under the new period's id — the state that held it no longer exists.
  */
 export function AttendanceWorkspace({ workspace }: { workspace: AttendanceWorkspaceData }) {
-  return <AttendanceWorkspaceForm key={workspace.slot?.timetableEntryId ?? "none"} workspace={workspace} />;
+  return <AttendanceWorkspaceForm key={workspace.slot ? `${workspace.slot.classroomId}:${workspace.slot.periodId}` : "none"} workspace={workspace} />;
 }
 
 function AttendanceWorkspaceForm({ workspace }: { workspace: AttendanceWorkspaceData }) {
@@ -75,7 +82,8 @@ function AttendanceWorkspaceForm({ workspace }: { workspace: AttendanceWorkspace
     setActionState(null);
     startTransition(async () => {
       const result = await submitAttendanceAction({
-        timetableEntryId: workspace.slot?.timetableEntryId,
+        classroomId: workspace.slot?.classroomId,
+        periodId: workspace.slot?.periodId,
         businessDate: workspace.businessDate,
         records: students.map(({ enrollmentId, status }) => ({ enrollmentId, status })),
       });
@@ -101,17 +109,26 @@ function AttendanceWorkspaceForm({ workspace }: { workspace: AttendanceWorkspace
           <p className="px-1 text-xs font-bold text-muted">زنگ‌های این روز</p>
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {workspace.slots.map((slot) => {
-              const isCurrent = slot.timetableEntryId === workspace.slot?.timetableEntryId;
+              // A period is keyed by classroom and period together: period ids are
+              // only unique within the school's list, so two classes' period 3 are
+              // different slots that must not be treated as the same row.
+              const slotKey = `${slot.classroomId}:${slot.periodId}`;
+              const isCurrent = slotKey === (workspace.slot ? `${workspace.slot.classroomId}:${workspace.slot.periodId}` : null);
               return (
                 <a
-                  key={slot.timetableEntryId}
-                  href={`/attendance?date=${workspace.businessDate}&timetableEntryId=${slot.timetableEntryId}`}
+                  key={slotKey}
+                  href={`/attendance?date=${workspace.businessDate}&classroomId=${slot.classroomId}&periodId=${slot.periodId}`}
                   aria-current={isCurrent ? "true" : undefined}
                   className={`flex min-w-[11rem] shrink-0 flex-col gap-1 rounded-xl border px-3 py-2.5 text-start transition ${isCurrent ? "border-primary bg-primary text-white" : "border-border bg-surface hover:bg-sage/60"}`}
                 >
                   <span className={`text-[0.7rem] font-bold ${isCurrent ? "text-white/70" : "text-muted"}`}>زنگ {toPersianDigits(slot.periodOrdinal)} · {clock(slot.startTime)}</span>
                   <span className="truncate text-sm font-bold">{slot.classroomName}</span>
-                  <span className={`truncate text-[0.7rem] ${isCurrent ? "text-white/70" : "text-muted"}`}>{slot.subjectName}</span>
+                  <span className={`truncate text-[0.7rem] ${isCurrent ? "text-white/70" : "text-muted"}`}>{slot.subjectNames.join(" / ")}</span>
+                  {/* A split period's owner changes weekly, so the tile says whose
+                      week it is rather than leaving the teacher to infer it. */}
+                  <span className={`truncate text-[0.7rem] ${isCurrent ? "text-white/70" : "text-muted"}`}>
+                    {slot.rotates ? `${slot.teacherName} · هفته ${toPersianDigits(slot.academicWeekNumber)}` : slot.teacherName}
+                  </span>
                   <span className={`mt-0.5 text-[0.7rem] font-bold ${slot.sessionId ? "text-success" : isCurrent ? "text-accent" : "text-warning"}`}>
                     {slot.sessionId ? "ثبت شده" : "ثبت نشده"}
                   </span>
@@ -127,11 +144,20 @@ function AttendanceWorkspaceForm({ workspace }: { workspace: AttendanceWorkspace
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <SectionHeading
                   eyebrow={`${workspace.slot.shiftName} · زنگ ${toPersianDigits(workspace.slot.periodOrdinal)} (${clock(workspace.slot.startTime)} تا ${clock(workspace.slot.endTime)})`}
-                  title={`${workspace.slot.classroomName} — ${workspace.slot.subjectName}`}
+                  title={`${workspace.slot.classroomName} — ${workspace.slot.subjectNames.join(" / ")}`}
                   description={`${toPersianDigits(students.length)} دانش‌آموز`}
                 />
                 <Badge tone={workspace.slot.sessionId ? "success" : "warning"}>{workspace.slot.sessionId ? "قبلاً ثبت شده" : "ثبت امروز"}</Badge>
               </div>
+              {/* A split period is registered by one teacher for the whole period,
+                  alternating weekly; saying whose week it is explains why the other
+                  teacher cannot submit it. */}
+              {workspace.slot.rotates ? (
+                <p className="mt-3 rounded-xl border border-secondary/25 bg-secondary/8 p-3 text-xs leading-6 text-primary" role="status">
+                  مسئول ثبت این زنگ در هفته {toPersianDigits(workspace.slot.academicWeekNumber)} سال تحصیلی: <span className="font-bold">{workspace.slot.teacherName}</span>
+                  {workspace.slot.partnerTeacherName ? <> — هفته‌های بعد به‌ترتیب با {workspace.slot.partnerTeacherName} جابه‌جا می‌شود.</> : null}
+                </p>
+              ) : null}
               <div className="mt-5 flex flex-col gap-3 sm:flex-row">
                 <label className="relative min-w-0 flex-1">
                   <span className="sr-only">جست‌وجوی دانش‌آموز</span>

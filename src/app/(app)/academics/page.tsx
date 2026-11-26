@@ -37,9 +37,9 @@ const sections: readonly AcademicSection[] = [
     icon: "classroom",
   },
   {
-    href: "/academics/shifts",
+    href: "/academics/periods",
     title: "شیفت‌ها و زنگ‌ها",
-    description: "روزهای فعالیت، تعداد زنگ‌ها و شیفت چرخشی مدرسه را تنظیم کنید.",
+    description: "روزهای فعالیت، زنگ‌های روز و شیفت چرخشی مدرسه را تنظیم کنید.",
     icon: "shift",
   },
   {

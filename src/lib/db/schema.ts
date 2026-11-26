@@ -206,6 +206,15 @@ export const schoolSettings = pgTable("school_settings", {
  * end and the next one's start is simply a gap, which is why the table has no
  * break row and no interval column.
  *
+ * `startTime`/`endTime` are the period's times in the shift the school opens in,
+ * which is what a fixed school has and all it needs. A rotating school runs two
+ * shifts, so it also carries `afternoonStartTime`/`afternoonEndTime` for the
+ * weeks it is in the afternoon; those are null for a fixed school, and which pair
+ * applies on a date is resolved from the shift that date falls in (see
+ * `resolveApplicableShift` and `resolvePeriodTimes`). Keeping the opening shift in
+ * the original two columns means a school that never rotates — and every existing
+ * row — needs nothing more.
+ *
  * A period is naturally two hours, and it is the *assignments* inside it that
  * decide what those hours are: a period whose two hour rows name the same teacher
  * and subject is a two-hour lesson, and one whose rows differ is a period split
@@ -219,12 +228,22 @@ export const schoolPeriods = pgTable("school_periods", {
   ordinal: integer("ordinal").notNull(),
   startTime: time("start_time").notNull(),
   endTime: time("end_time").notNull(),
+  // The same period's times in the afternoon shift, present exactly when the
+  // school rotates. Both are set or both are null, which the check below enforces.
+  afternoonStartTime: time("afternoon_start_time"),
+  afternoonEndTime: time("afternoon_end_time"),
   ...timestamps,
 }, (table) => [
   unique("school_periods_school_ordinal_unique").on(table.schoolId, table.ordinal),
   unique("school_periods_school_id_id_unique").on(table.schoolId, table.id),
   check("school_periods_time_order_check", sql`${table.startTime} < ${table.endTime}`),
   check("school_periods_ordinal_check", sql`${table.ordinal} > 0`),
+  // The afternoon pair is all-or-nothing and ordered, so a half-entered afternoon
+  // schedule cannot exist to be read as a time that never happened.
+  check("school_periods_afternoon_times_check", sql`(
+    (${table.afternoonStartTime} is null and ${table.afternoonEndTime} is null)
+    or (${table.afternoonStartTime} is not null and ${table.afternoonEndTime} is not null and ${table.afternoonStartTime} < ${table.afternoonEndTime})
+  )`),
   index("school_periods_school_ordinal_idx").on(table.schoolId, table.ordinal),
 ]);
 
@@ -644,15 +663,16 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   classroomId: uuid("classroom_id").notNull(),
   academicYearId: uuid("academic_year_id").notNull(),
   businessDate: date("business_date", { mode: "string" }).notNull(),
-  // The timetable assignment the session belongs to. Attendance is per teaching
-  // hour, so the assignment — which names the period, the hour of it, and the
-  // weekday — is what identifies the session; the classroom and year are carried
-  // explicitly so the row stays a complete tenant-scoped record on its own.
-  timetableEntryId: uuid("timetable_entry_id").notNull(),
-  subjectId: uuid("subject_id").notNull(),
-  // Who is responsible for this occurrence, taken from the assignment at the moment
-  // the session is opened. Stored rather than re-derived so the record names the
-  // person who owes the submission even after the timetable is edited.
+  // The period this register covers, not one of its hours. A split period is one
+  // occasion whose responsibility alternates weekly between the two teachers who
+  // hold its hours, so it is registered once — by whichever of them the week names
+  // — rather than once per hour. The classroom and year are carried explicitly so
+  // the row stays a complete tenant-scoped record on its own.
+  periodId: uuid("period_id").notNull(),
+  // Who is responsible for this occurrence. For a period one teacher holds, that
+  // teacher; for a split one, the teacher the week resolved to. Stored rather than
+  // re-derived so the record names the person who owed the submission even after
+  // the timetable or the rotation has moved on.
   teacherMembershipId: uuid("teacher_membership_id").notNull(),
   // Which shift the school was in on this date, resolved from the configuration
   // when the session was opened. Stored rather than re-derived because a rotating
@@ -672,24 +692,19 @@ export const attendanceSessions = pgTable("attendance_sessions", {
 }, (table) => [
   unique("attendance_sessions_school_id_classroom_unique").on(table.schoolId, table.id, table.classroomId),
   unique("attendance_sessions_school_id_id_unique").on(table.schoolId, table.id),
-  // One session per classroom teaching hour. A period's two hours are two
-  // sessions, because each lesson is its own register with its own teacher and
-  // subject.
-  unique("attendance_sessions_school_entry_date_unique").on(table.schoolId, table.timetableEntryId, table.businessDate),
+  // One session per classroom period on a date. A split period is one register for
+  // the whole period, because its two hours are one occasion that one teacher owes
+  // in any given week; its two subjects stay in the timetable, where they belong.
+  unique("attendance_sessions_school_period_date_unique").on(table.schoolId, table.classroomId, table.periodId, table.businessDate),
   foreignKey({
     columns: [table.schoolId, table.classroomId, table.academicYearId],
     foreignColumns: [classrooms.schoolId, classrooms.id, classrooms.academicYearId],
     name: "attendance_sessions_school_classroom_year_fk",
   }).onDelete("restrict"),
   foreignKey({
-    columns: [table.schoolId, table.timetableEntryId],
-    foreignColumns: [timetableEntries.schoolId, timetableEntries.id],
-    name: "attendance_sessions_school_timetable_entry_fk",
-  }).onDelete("restrict"),
-  foreignKey({
-    columns: [table.schoolId, table.subjectId],
-    foreignColumns: [subjects.schoolId, subjects.id],
-    name: "attendance_sessions_school_subject_fk",
+    columns: [table.schoolId, table.periodId],
+    foreignColumns: [schoolPeriods.schoolId, schoolPeriods.id],
+    name: "attendance_sessions_school_period_fk",
   }).onDelete("restrict"),
   foreignKey({
     columns: [table.schoolId, table.teacherMembershipId],
