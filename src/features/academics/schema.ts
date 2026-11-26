@@ -56,19 +56,6 @@ export const createClassroomSchema = z.object({
   capacity: z.coerce.number().int().positive().max(1000).nullable().optional(),
 });
 
-export const assignTeacherSchema = z.object({
-  classroomId: z.string().uuid(),
-  teacherMembershipId: z.string().uuid(),
-  subjectId: z.string().uuid().nullable().optional(),
-  startDate: dateSchema,
-  endDate: dateSchema.nullable().optional(),
-  isPrimary: z.preprocess((value) => value === true || value === "on", z.boolean()).default(false),
-}).superRefine((value, context) => {
-  if (value.endDate && value.startDate >= value.endDate) {
-    context.addIssue({ code: "custom", path: ["endDate"], message: "تاریخ پایان باید بعد از تاریخ شروع باشد." });
-  }
-});
-
 export type UpdateSchoolConfigurationInput = z.infer<typeof updateSchoolConfigurationSchema>;
 export type UpdateSchoolStatusInput = z.infer<typeof updateSchoolStatusSchema>;
 export type CreateAcademicYearInput = z.infer<typeof createAcademicYearSchema>;
@@ -77,4 +64,3 @@ export type CreateGradeInput = z.infer<typeof createGradeSchema>;
 export type CreateSubjectInput = z.infer<typeof createSubjectSchema>;
 export type ArchiveCatalogItemInput = z.infer<typeof archiveCatalogItemSchema>;
 export type CreateClassroomInput = z.infer<typeof createClassroomSchema>;
-export type AssignTeacherInput = z.infer<typeof assignTeacherSchema>;

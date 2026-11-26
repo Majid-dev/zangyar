@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { academicYears, auditLogs, classrooms, enrollments, grades, schoolMemberships, schools, students } from "@/lib/db/schema";
-import { createAcademicYear, createClassroom, createGrade, createSubject, assignTeacher, transitionAcademicYear, updateSchoolConfiguration } from "./services";
+import { createAcademicYear, createClassroom, createGrade, createSubject, transitionAcademicYear, updateSchoolConfiguration } from "./services";
 import { listClassroomsForContext } from "./queries";
 import { createEnrollment } from "@/features/students/services";
 
@@ -52,7 +52,6 @@ describe.skipIf(!canRun)("persisted Phase 4 school and academic management", () 
   let yearB: string;
   let gradeA: string;
   let gradeB: string;
-  let subjectA: string;
   let classroomA: string;
   let teacherMembershipA: string;
 
@@ -78,22 +77,24 @@ describe.skipIf(!canRun)("persisted Phase 4 school and academic management", () 
 
   it("creates tenant-scoped grade, subject, and classroom", async () => {
     gradeA = (await createGrade({ headers: admin.headers, input: { code: "G1", name: "Grade 1", sortOrder: 1 } })).id;
-    subjectA = (await createSubject({ headers: admin.headers, input: { code: "MATH", name: "Mathematics" } })).id;
+    await createSubject({ headers: admin.headers, input: { code: "MATH", name: "Mathematics" } });
     classroomA = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearA, gradeId: gradeA, code: "A", name: "Class A", capacity: 30 } })).id;
 
     const [stored] = await getDb().select({ schoolId: classrooms.schoolId }).from(classrooms).where(eq(classrooms.id, classroomA));
     expect(stored.schoolId).toBe(schoolA);
   });
 
-  it("assigns only an active same-tenant teacher", async () => {
-    const assignment = await assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, subjectId: subjectA, startDate: "2026-09-23", isPrimary: true } });
-    expect(assignment.schoolId).toBe(schoolA);
-  });
-
-  it("rejects duplicate subjectless assignments and out-of-window dates", async () => {
-    await expect(assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, startDate: "2026-09-23", isPrimary: false } })).resolves.toBeDefined();
-    await expect(assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, startDate: "2026-09-24", isPrimary: false } })).rejects.toThrow("already assigned");
-    await expect(assignTeacher({ headers: admin.headers, input: { classroomId: classroomA, teacherMembershipId: teacherMembershipA, startDate: "2020-01-01", isPrimary: false } })).rejects.toThrow("must fit within");
+  // A classroom no longer names a teacher of its own: its teachers are the
+  // timetable hours inside it, so the record kept is that the class carries no
+  // teacher column at all rather than that one was cleared.
+  it("stores a classroom without any teacher relationship", async () => {
+    const [row] = await getDb().select().from(classrooms).where(eq(classrooms.id, classroomA));
+    expect(row).not.toHaveProperty("homeroomTeacherMembershipId");
+    // The extra membership from the fixture is still a real teacher of the school,
+    // which is what makes the absence above a property of the table and not of the
+    // fixture being empty.
+    const [teacher] = await getDb().select({ id: schoolMemberships.id }).from(schoolMemberships).where(eq(schoolMemberships.id, teacherMembershipA));
+    expect(teacher?.id).toBe(teacherMembershipA);
   });
 
   it("rejects cross-tenant classroom creation", async () => {

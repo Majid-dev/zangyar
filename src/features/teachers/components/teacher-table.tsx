@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input, Select } from "@/components/ui/field";
 import { Panel } from "@/components/ui/panel";
 import { formatPersianDateShort } from "@/lib/date";
+import { toPersianDigits } from "@/lib/jalali";
 
 import type { TeacherListRow } from "../queries";
 import { TEACHER_DISPLAY_STATUS_LABELS, TEACHER_DISPLAY_STATUS_TONES } from "../status";
@@ -24,10 +25,6 @@ function formatMobileForDisplay(mobile: string | null) {
   if (!mobile) return null;
   const groups = [mobile.slice(0, 4), mobile.slice(4, 7), mobile.slice(7)].filter((part) => part.length > 0);
   return groups.map((part) => toPersianDigits(part)).join(" ");
-}
-
-function toPersianDigits(value: string) {
-  return value.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
 }
 
 const VERIFICATION_LABELS: Record<string, string> = {
@@ -53,6 +50,9 @@ type TeacherTableProps = {
   status?: string;
   sort?: SortField;
   dir?: Direction;
+  /** The year hours are recorded against, or null when the school has none. */
+  activeAcademicYearId: string | null;
+  activeAcademicYearName: string | null;
 };
 
 /**
@@ -74,6 +74,8 @@ export function TeacherTable({
   status,
   sort = "name",
   dir = "asc",
+  activeAcademicYearId,
+  activeAcademicYearName,
 }: TeacherTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -114,7 +116,7 @@ export function TeacherTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[880px] text-start text-sm" dir="rtl">
+        <table className="w-full min-w-[960px] text-start text-sm" dir="rtl">
           <caption className="sr-only">فهرست شماره‌های همراه ثبت‌شده، وضعیت ثبت‌نام و تأیید شماره</caption>
           <thead className="bg-sage/50 text-xs text-muted">
             <tr>
@@ -127,11 +129,13 @@ export function TeacherTable({
               <HeaderCell label="کد پرسنلی" sortField="personnel" sort={sort} dir={dir} onSort={sortBy} align="end">
                 <TextFilter label="کد پرسنلی" placeholder="کد" value={personnelCode} onSubmit={(value) => updateParams({ personnelCode: value || null })} dir="ltr" />
               </HeaderCell>
+              <HeaderCell label="ساعت موظفی" sortField="personnel" sort={sort} dir={dir} onSort={sortBy} hideSort align="end" />
               <HeaderCell label="وضعیت" sortField="status" sort={sort} dir={dir} onSort={sortBy}>
                 <Select aria-label="فیلتر وضعیت" value={status ?? ""} onChange={(event) => updateParams({ status: event.target.value || null })} className="min-h-8 px-2 text-xs">
                   <option value="">همه وضعیت‌ها</option>
                   <option value="PENDING_REGISTRATION">در انتظار ثبت‌نام</option>
                   <option value="PENDING_ADMIN_APPROVAL">در انتظار تأیید مدیر</option>
+                  <option value="AWAITING_HOURS">در انتظار تعیین ساعت موظفی</option>
                   <option value="ACTIVE">فعال</option>
                   <option value="REJECTED">رد‌شده</option>
                   <option value="DEACTIVATED">غیرفعال</option>
@@ -161,6 +165,16 @@ export function TeacherTable({
                     <span dir="ltr" className="inline-block font-bold tabular-nums text-primary">{formatMobileForDisplay(teacher.phoneNumber)}</span>
                   </td>
                   <td className="px-4 py-4 text-end text-xs text-muted">{teacher.personnelCode ?? "—"}</td>
+                  <td className="px-4 py-4 text-end">
+                    {teacher.requiredWeeklyHours === null ? (
+                      // Missing and zero read the same to the rule, so they read the
+                      // same here: both mean the school has not said what the
+                      // teacher owes, which is what blocks scheduling.
+                      <Badge tone="warning">تعیین نشده</Badge>
+                    ) : (
+                      <span className="text-xs font-bold tabular-nums text-primary">{toPersianDigits(String(teacher.requiredWeeklyHours))} ساعت</span>
+                    )}
+                  </td>
                   <td className="px-4 py-4 text-start">
                     <Badge tone={TEACHER_DISPLAY_STATUS_TONES[teacher.displayStatus]}>{TEACHER_DISPLAY_STATUS_LABELS[teacher.displayStatus]}</Badge>
                     {teacher.registeredAt ? <span className="mt-1 block text-[11px] text-muted/80">ثبت‌نام {formatPersianDateShort(toIsoDate(teacher.registeredAt))}</span> : null}
@@ -171,17 +185,20 @@ export function TeacherTable({
                   <td className="px-5 py-4">
                     <TeacherRowActions
                       registrationId={teacher.registrationId}
+                      teacherName={teacher.firstName && teacher.lastName ? `${teacher.firstName} ${teacher.lastName}` : teacher.phoneNumber}
                       statusAction={teacher.statusAction}
                       rejectionAction={teacher.rejectionAction}
                       canEditMobile={teacher.canEditMobile}
                       canDeleteRegistration={teacher.canDeleteRegistration}
+                      hasActiveAcademicYear={activeAcademicYearId !== null}
+                      activeAcademicYearName={activeAcademicYearName}
                       compact
                     />
                   </td>
                 </tr>
               );
             })}
-            {rows.length === 0 ? <tr><td colSpan={6} className="p-10 text-center text-sm text-muted">دبیری با این فیلتر پیدا نشد.</td></tr> : null}
+            {rows.length === 0 ? <tr><td colSpan={7} className="p-10 text-center text-sm text-muted">دبیری با این فیلتر پیدا نشد.</td></tr> : null}
           </tbody>
         </table>
       </div>

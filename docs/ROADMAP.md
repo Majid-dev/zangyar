@@ -117,16 +117,22 @@ Migration and persisted test commands: `corepack pnpm db:test-clean` and `corepa
 
 **Status:** In progress
 
-**Completed slice:** Tenant/date-authorized classroom roster, daily session/record persistence, four-status upsert, same-day teacher restriction, correction audit events, Server Action wiring, data-backed attendance dashboard summary, and isolated Phase 6 integration wrapper/test.
+**Completed slice:** Tenant/date-authorized roster, daily session/record persistence, four-status upsert, same-day teacher restriction, correction audit events, Server Action wiring, data-backed attendance dashboard summary, and isolated Phase 6 integration wrapper/test.
 
-- Implement school-local business-date handling.
-- Create or load one daily session per classroom/date.
-- Record the four attendance statuses.
-- Enforce session and record uniqueness.
-- Implement teacher assignment authorization.
-- Add correction/finalization behavior after policy confirmation.
-- Read the school's attendance notification policy and create eligible transactional outbox entries with recipient/message snapshots. (Completed in current Phase 6 slice.)
-- Add attendance reports and expand audit-read coverage.
+**Completed mandatory hours:** a teacher's mandatory weekly hours are set in the approval dialog and editable from the teacher's page; a teacher with zero or missing hours is reported as awaiting hours rather than active and cannot be given timetable slots.
+
+**Completed scheduling foundation:** teacher weekly mandatory hours per academic year; weekly timetable with teacher-subject-class assignments; school operating days; a single ordered period list per school; shift configuration (morning, afternoon, or rotating weekly) with a rotation base date, edited on `/academics/periods`; a submission deadline after each period; the applicable shift for any date calculated from the configuration and its anchor; and attendance records linked to classroom, students, students' enrollments, period, teacher, subject, date, and timetable assignment. Non-operating days and dates whose weekday does not match the assigned period are refused for attendance, as are periods outside the applicable shift.
+
+**Completed timetable assignment interface:** the assignment grid at `/academics/timetable` draws one classroom's week as days by periods, with each period shown as its two teaching hours and only the school's operating days as rows. Cells are selected and then given a teacher and a subject in one form, so a whole period, a single hour, and a period split between two teachers with two different subjects are all reachable the same way, and the teacher and subject pickers are searchable. A period whose two hours hold the same teacher and subject is drawn as one joined cell labelled "two hours" and splits back into its hours when edited; a period whose hours differ shows each hour's own teacher and lesson. The teacher list offers only teachers with recorded mandatory hours and shows each one's remaining capacity; assigned, partially assigned, empty, and conflicting cells are visually distinct. `assignTimetableHours` refuses a teacher already teaching a selected hour elsewhere, an assignment past the teacher's mandatory hours, a teacher with no recorded figure, and an hour on a non-operating day, while counting a re-saved cell as no new hour. A classroom no longer names a liable (homeroom) teacher: its teachers are the hours inside it, and teacher access to a roster follows from holding one. Assigned-hours reporting counts each assignment as one hour for the teacher it names.
+
+- Implement school-local business-date handling. (Completed.)
+- Create or load one daily session per classroom/date. (Superseded by per-hour sessions; completed.)
+- Record the four attendance statuses. (Completed.)
+- Enforce session and record uniqueness. (Completed.)
+- Implement teacher assignment authorization. (Completed via timetable-hour access.)
+- Add correction/finalization behavior after policy confirmation. (Correction is implemented and audited; a submission window is enforced per period.)
+- Read the school's attendance notification policy and create eligible transactional outbox entries with recipient/message snapshots. (Completed.)
+- Add attendance reports and expand audit-read coverage. (Assigned-hours reporting is implemented; per-student attendance reports remain.)
 
 **Exit criteria:** Authorized staff can record and review daily attendance, while duplicate sessions, invalid enrollments, and cross-tenant access are rejected.
 

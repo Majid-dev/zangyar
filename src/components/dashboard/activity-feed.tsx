@@ -1,9 +1,9 @@
 import { Panel, SectionHeading } from "@/components/ui/panel";
 import { Badge } from "@/components/ui/badge";
 
-export function ActivityFeed({ date, pendingClassroomCount }: { date: string; pendingClassroomCount: number }) {
+export function ActivityFeed({ date, pendingPeriodCount }: { date: string; pendingPeriodCount: number }) {
   const activities = [
-    { title: pendingClassroomCount === 0 ? "ثبت حضور همه کلاس‌ها کامل شد" : `${pendingClassroomCount} کلاس در انتظار ثبت حضور است`, meta: date, tone: pendingClassroomCount === 0 ? "success" as const : "warning" as const, mark: pendingClassroomCount === 0 ? "✓" : "!" },
+    { title: pendingPeriodCount === 0 ? "ثبت حضور همه زنگ‌ها کامل شد" : `${pendingPeriodCount} زنگ در انتظار ثبت حضور است`, meta: date, tone: pendingPeriodCount === 0 ? "success" as const : "warning" as const, mark: pendingPeriodCount === 0 ? "✓" : "!" },
     { title: "فهرست دانش‌آموزان از ثبت‌نام‌های فعال خوانده شد", meta: "داده مدرسه", tone: "info" as const, mark: "↗" },
   ];
   return (

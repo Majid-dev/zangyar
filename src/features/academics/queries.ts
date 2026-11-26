@@ -1,10 +1,10 @@
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 
 import { requireSchoolAccess, requireSchoolRole, type ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getDb } from "@/lib/db";
-import { academicYears, classTeachers, classrooms, grades, schoolSettings, subjects, users, schoolMemberships } from "@/lib/db/schema";
+import { academicYears, classrooms, grades, schoolSettings, subjects, timetableEntries, users, schoolMemberships } from "@/lib/db/schema";
 
 export async function getSchoolConfiguration(options: { headers: Headers; schoolId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
@@ -78,28 +78,43 @@ export async function listClassroomsForContext(context: ActiveSchoolMembership, 
     )).orderBy(asc(classrooms.name));
 }
 
-export async function listClassroomTeachers(options: { headers: Headers; schoolId?: string; classroomId?: string }) {
-  const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
-  return listClassroomTeachersForContext(context, options.classroomId);
-}
-
-export async function listClassroomTeachersForContext(context: ActiveSchoolMembership, classroomId?: string) {
-  return getDb().select({
-    assignment: classTeachers,
-    teacher: users,
-    membership: schoolMemberships,
-  }).from(classTeachers)
-    .innerJoin(schoolMemberships, and(
-      eq(schoolMemberships.id, classTeachers.teacherMembershipId),
-      eq(schoolMemberships.schoolId, context.schoolId),
-      eq(schoolMemberships.status, "ACTIVE"),
+/**
+ * Classrooms with a count of the timetable hours they hold.
+ *
+ * This used to also join a homeroom teacher, which no longer exists: the class
+ * owns no teacher relationship of its own, because every teacher relationship a
+ * class has is one of the timetable hours inside it. A classroom with no hours is
+ * therefore a class nobody teaches yet, which is exactly what the count says.
+ */
+export async function listClassroomsWithTeachersForContext(context: ActiveSchoolMembership) {
+  const rows = await getDb().select({
+    classroom: classrooms,
+  }).from(classrooms)
+    .innerJoin(academicYears, and(
+      eq(academicYears.id, classrooms.academicYearId),
+      eq(academicYears.schoolId, context.schoolId),
     ))
-    .innerJoin(users, eq(users.id, schoolMemberships.userId))
     .where(and(
-      eq(classTeachers.schoolId, context.schoolId),
-      eq(classTeachers.status, "ACTIVE"),
-      classroomId ? eq(classTeachers.classroomId, classroomId) : undefined,
-    ));
+      eq(classrooms.schoolId, context.schoolId),
+      eq(classrooms.status, "ACTIVE"),
+      inArray(academicYears.status, ["DRAFT", "ACTIVE"]),
+    ))
+    .orderBy(asc(classrooms.name));
+
+  // Timetable hour counts come from one grouped query rather than a join, so a
+  // classroom with several hours still appears once.
+  const slotCounts = await getDb().select({
+    classroomId: timetableEntries.classroomId,
+    count: count(timetableEntries.id),
+  }).from(timetableEntries)
+    .where(and(eq(timetableEntries.schoolId, context.schoolId), eq(timetableEntries.status, "ACTIVE")))
+    .groupBy(timetableEntries.classroomId);
+  const countByClassroom = new Map(slotCounts.map((row) => [row.classroomId, Number(row.count)]));
+
+  return rows.map((row) => ({
+    classroom: row.classroom,
+    timetableHourCount: countByClassroom.get(row.classroom.id) ?? 0,
+  }));
 }
 
 export async function listTeacherMemberships(options: { headers: Headers; schoolId?: string }) {
@@ -120,18 +135,4 @@ export async function listTeacherMembershipsForContext(context: ActiveSchoolMemb
       eq(schoolMemberships.role, "TEACHER"),
       eq(schoolMemberships.status, "ACTIVE"),
     )).orderBy(asc(users.name));
-}
-
-export async function listClassroomsWithTeachersForContext(context: ActiveSchoolMembership) {
-  const [classroomRows, assignmentRows] = await Promise.all([
-    listClassroomsForContext(context),
-    listClassroomTeachersForContext(context),
-  ]);
-  const assignmentsByClassroom = new Map<string, typeof assignmentRows>();
-  for (const row of assignmentRows) {
-    const existing = assignmentsByClassroom.get(row.assignment.classroomId) ?? [];
-    existing.push(row);
-    assignmentsByClassroom.set(row.assignment.classroomId, existing);
-  }
-  return classroomRows.map((classroom) => ({ classroom, assignments: assignmentsByClassroom.get(classroom.id) ?? [] }));
 }

@@ -1,9 +1,7 @@
 import "server-only";
 
-import { and, eq, lte, or, isNull, gt } from "drizzle-orm";
-
 import { requireSchoolRole, type ActiveSchoolMembership } from "@/lib/auth/authorization";
-import { classTeachers } from "@/lib/db/schema";
+import { assertTeacherHasClassroomAccess } from "@/features/scheduling/policy";
 import type { getDb } from "@/lib/db";
 
 export async function requireStudentManagementAccess(headers: Headers) {
@@ -19,27 +17,19 @@ export async function requireStudentReadAccess(headers: Headers) {
 type QueryDb = ReturnType<typeof getDb>;
 type QueryExecutor = Pick<QueryDb, "select">;
 
+/**
+ * A teacher may read a classroom's roster when they teach an hour in it; a School
+ * Admin may read any classroom in the school. The rule itself lives in the
+ * scheduling feature, because that is where the assignments are, and both this
+ * module and attendance consult it rather than restating it.
+ */
 export async function assertTeacherCanReadClassroom(
   context: ActiveSchoolMembership,
   db: QueryExecutor,
   classroomId: string,
-  businessDate: string,
 ) {
   if (context.role === "SCHOOL_ADMIN") return;
-
-  const assignments = await db.select({ id: classTeachers.id })
-    .from(classTeachers)
-    .where(and(
-      eq(classTeachers.schoolId, context.schoolId),
-      eq(classTeachers.classroomId, classroomId),
-      eq(classTeachers.teacherMembershipId, context.membershipId),
-      eq(classTeachers.status, "ACTIVE"),
-      lte(classTeachers.startDate, businessDate),
-      or(isNull(classTeachers.endDate), gt(classTeachers.endDate, businessDate)),
-    ))
-    .limit(1);
-
-  if (assignments.length === 0) throw new Error("Teacher is not assigned to this classroom.");
+  await assertTeacherHasClassroomAccess(context, db, classroomId);
 }
 
 export function isDateEffective(startDate: string, endDate: string | null, businessDate: string) {

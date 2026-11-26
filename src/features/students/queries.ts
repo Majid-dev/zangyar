@@ -2,11 +2,11 @@ import "server-only";
 
 import { and, asc, count, desc, eq, gt, ilike, isNull, lte, or, sql } from "drizzle-orm";
 
-import { requireStudentManagementAccess, requireStudentReadAccess } from "./policy";
+import { requireStudentManagementAccess, requireStudentReadAccess, assertTeacherCanReadClassroom } from "./policy";
 import { maskMobile } from "./normalization";
 import { studentListFilterSchema, rosterSchema, type StudentListFilter } from "./schema";
 import { getDb } from "@/lib/db";
-import { academicYears, classTeachers, classrooms, enrollments, guardians, studentGuardians, students } from "@/lib/db/schema";
+import { academicYears, classrooms, enrollments, guardians, studentGuardians, students } from "@/lib/db/schema";
 import type { ActiveSchoolMembership } from "@/lib/auth/authorization";
 
 export type StudentListRow = {
@@ -171,15 +171,7 @@ export async function listEffectiveClassroomStudentsForContext(
   );
 
   if (context.role === "TEACHER") {
-    const [assignment] = await db.select({ id: classTeachers.id }).from(classTeachers).where(and(
-      eq(classTeachers.schoolId, context.schoolId),
-      eq(classTeachers.classroomId, parsed.classroomId),
-      eq(classTeachers.teacherMembershipId, context.membershipId),
-      eq(classTeachers.status, "ACTIVE"),
-      lte(classTeachers.startDate, parsed.businessDate),
-      or(isNull(classTeachers.endDate), gt(classTeachers.endDate, parsed.businessDate)),
-    )).limit(1);
-    if (!assignment) throw new Error("Teacher is not assigned to this classroom.");
+    await assertTeacherCanReadClassroom(context, db, parsed.classroomId);
   }
 
   return db.select({

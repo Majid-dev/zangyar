@@ -33,8 +33,8 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <ActivityFeed date={formatPersianDate(data.date)} pendingClassroomCount={data.attendance.pendingClassroomCount} />
-        <QuickActions pendingClassroomCount={data.attendance.pendingClassroomCount} />
+        <ActivityFeed date={formatPersianDate(data.date)} pendingPeriodCount={data.attendance.pendingPeriodCount} />
+        <QuickActions pendingPeriodCount={data.attendance.pendingPeriodCount} />
         <section className="relative overflow-hidden rounded-2xl bg-primary p-5 text-white shadow-[0_14px_32px_rgba(23,59,87,0.12)] lg:col-span-1">
           <span className="absolute -end-7 -top-7 size-32 rounded-full border-[18px] border-white/5" aria-hidden="true" />
           <p className="text-xs font-bold text-white/60">یادآوری امروز</p>
@@ -42,7 +42,7 @@ export default async function DashboardPage() {
           <p className="mt-3 max-w-[16rem] text-sm leading-6 text-white/70">ثبت به‌موقع، گزارش دقیق‌تری برای مدرسه و خانواده‌ها می‌سازد.</p>
           <div className="mt-7 flex items-center gap-2 text-xs font-bold text-accent">
             <span className="size-2 rounded-full bg-accent" aria-hidden="true" />
-            {data.attendance.pendingClassroomCount === 0 ? "ثبت امروز کامل شده" : `${data.attendance.pendingClassroomCount} کلاس باقی مانده`}
+            {data.attendance.pendingPeriodCount === 0 ? "ثبت امروز کامل شده" : `${data.attendance.pendingPeriodCount} زنگ باقی مانده`}
           </div>
         </section>
       </div>

@@ -18,6 +18,7 @@
     "test:integration:phase4": "node scripts/test-phase4-integration.mjs",
     "test:integration:phase5": "node scripts/test-phase5-integration.mjs",
     "test:integration:phase6": "node scripts/test-phase6-integration.mjs",
+    "test:integration:scheduling": "node scripts/test-scheduling-integration.mjs",
     "test:integration:teachers": "node scripts/test-teachers-integration.mjs",
     "test:integration:otp": "node scripts/test-otp-integration.mjs",
     "test:integration:account": "node scripts/test-account-integration.mjs"

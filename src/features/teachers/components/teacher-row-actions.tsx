@@ -9,6 +9,7 @@ import type { ActionResult, ActionState } from "@/lib/actions/result";
 
 import { deleteRegistrationAction, setTeacherStatusAction } from "../actions";
 import type { TeacherStatusAction } from "../status";
+import { TeacherApprovalDialog } from "./teacher-approval-dialog";
 
 /**
  * A one-line outcome that clears itself, so a row is not left shouting at the admin.
@@ -51,23 +52,34 @@ function RowFeedback({ state }: { state: ActionState<unknown> }) {
  * button; it never decides whether the move is legal, which is what stops a
  * hand-made request from approving a teacher who was already rejected.
  *
+ * An action whose `requiresWeeklyHours` is set does not submit from here: it opens
+ * the approval dialog, which collects the obligation that approval also records.
+ * The decision to open a dialog is therefore also derived from the server's answer,
+ * so the table and the detail page cannot disagree about which button needs one.
+ *
  * While the number is unclaimed there is no access to grant, so the row offers
  * correction and deletion instead. Once claimed, the number is the teacher's
  * login identity and those controls give way to the access decision.
  */
 export function TeacherRowActions({
   registrationId,
+  teacherName,
   statusAction,
   rejectionAction,
   canEditMobile,
   canDeleteRegistration,
+  hasActiveAcademicYear,
+  activeAcademicYearName,
   compact = false,
 }: {
   registrationId: string;
+  teacherName: string;
   statusAction: TeacherStatusAction | null;
   rejectionAction: TeacherStatusAction | null;
   canEditMobile: boolean;
   canDeleteRegistration: boolean;
+  hasActiveAcademicYear: boolean;
+  activeAcademicYearName: string | null;
   compact?: boolean;
 }) {
   const router = useRouter();
@@ -134,20 +146,31 @@ export function TeacherRowActions({
         ) : (
           <>
             {actions.map((action) => (
-              <button
-                key={action.status}
-                type="button"
-                disabled={isPending}
-                onClick={() => {
-                  // An action that ends someone's access asks first; one that only
-                  // restores it does not.
-                  if (action.confirmation) setConfirming(action.status);
-                  else runStatus(action);
-                }}
-                className={buttonClasses({ variant: action.tone, size: "sm" })}
-              >
-                {action.label}
-              </button>
+              action.requiresWeeklyHours ? (
+                <TeacherApprovalDialog
+                  key={action.status}
+                  registrationId={registrationId}
+                  teacherName={teacherName}
+                  action={action}
+                  hasActiveAcademicYear={hasActiveAcademicYear}
+                  activeAcademicYearName={activeAcademicYearName}
+                />
+              ) : (
+                <button
+                  key={action.status}
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => {
+                    // An action that ends someone's access asks first; one that only
+                    // restores it does not.
+                    if (action.confirmation) setConfirming(action.status);
+                    else runStatus(action);
+                  }}
+                  className={buttonClasses({ variant: action.tone, size: "sm" })}
+                >
+                  {action.label}
+                </button>
+              )
             ))}
 
             {canEditMobile ? (

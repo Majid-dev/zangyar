@@ -5,21 +5,24 @@ import { and, eq } from "drizzle-orm";
 import { writeAuditEvent } from "@/lib/audit";
 import { getAuthForTransaction, mobileAccountEmail } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { accounts, schoolMemberships, schools, teacherProfiles, teacherRegistrations, users } from "@/lib/db/schema";
+import { accounts, academicYears, schoolMemberships, schools, teacherProfiles, teacherRegistrations, teacherWeeklyHourRequirements, users } from "@/lib/db/schema";
 import { normalizeIranianMobile } from "@/lib/mobile";
 import { requestOtp, verifyOtp } from "@/features/otp/service";
 
+import { MISSING_HOURS_ON_APPROVAL_MESSAGE, NO_ACTIVE_YEAR_MESSAGE, isSchedulable } from "./hours";
 import { requireTeacherManagementAccess } from "./policy";
 import {
   completeTeacherRegistrationSchema,
   deleteRegistrationSchema,
   registerTeacherMobileSchema,
   setTeacherStatusSchema,
+  setTeacherWeeklyHoursSchema,
   updateRegistrationMobileSchema,
   updateTeacherSchema,
   type CompleteTeacherRegistrationInput,
   type RegisterTeacherMobileInput,
   type SetTeacherStatusInput,
+  type SetTeacherWeeklyHoursInput,
   type UpdateRegistrationMobileInput,
   type UpdateTeacherInput,
 } from "./schema";
@@ -137,6 +140,35 @@ async function resolveRegistrationMembership(tx: Transaction, schoolId: string, 
     ))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Writes one teacher's weekly obligation for one year, replacing any figure
+ * already recorded.
+ *
+ * The upsert target is the table's own uniqueness — school, teacher, year — so two
+ * concurrent corrections converge on one row instead of racing to insert a second.
+ * Returns the stored figure rather than the input so callers report what the
+ * database holds.
+ */
+async function upsertWeeklyHours(
+  tx: Transaction,
+  input: { schoolId: string; academicYearId: string; teacherMembershipId: string; requiredWeeklyHours: number },
+) {
+  const [row] = await tx
+    .insert(teacherWeeklyHourRequirements)
+    .values(input)
+    .onConflictDoUpdate({
+      target: [
+        teacherWeeklyHourRequirements.schoolId,
+        teacherWeeklyHourRequirements.teacherMembershipId,
+        teacherWeeklyHourRequirements.academicYearId,
+      ],
+      set: { requiredWeeklyHours: input.requiredWeeklyHours, updatedAt: new Date() },
+    })
+    .returning({ requiredWeeklyHours: teacherWeeklyHourRequirements.requiredWeeklyHours });
+  if (!row) throw new Error("The weekly hours could not be recorded.");
+  return row.requiredWeeklyHours;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +335,14 @@ export async function deleteRegistration(options: { headers: Headers; input: { r
  * names, and three places for the rules to drift apart; the rules now live in the
  * transition matrix in `./status` and are applied here once.
  *
+ * Approval additionally records the teacher's mandatory weekly hours, in the same
+ * transaction, because the two facts are one decision: an active teacher with no
+ * obligation cannot be put on a timetable, so approving without a figure would
+ * hand the admin a request they would immediately have to make again. A figure is
+ * therefore required when the target is `ACTIVE` and the teacher does not already
+ * have one — a reactivation keeps the obligation already on file rather than
+ * asking for it a second time.
+ *
  * The update is a compare-and-set on the status just read, so a concurrent
  * decision cannot be overwritten by a stale one — the loser gets a clear sentence
  * instead of silently winning.
@@ -321,6 +361,35 @@ export async function setTeacherStatus(options: { headers: Headers; input: SetTe
     const from = resolved.status as MembershipStatus;
     if (!canTransitionTeacherStatus(from, input.status)) {
       throw new Error(`Invalid teacher status transition: ${from} to ${input.status}.`);
+    }
+
+    // Into ACTIVE is the moment the obligation is established, so the year and any
+    // existing figure are resolved only for that direction.
+    let yearId: string | null = null;
+    let existingHours: number | null = null;
+    if (input.status === "ACTIVE") {
+      const [year] = await tx
+        .select({ id: academicYears.id })
+        .from(academicYears)
+        .where(and(eq(academicYears.schoolId, context.schoolId), eq(academicYears.status, "ACTIVE")))
+        .limit(1);
+      if (!year) throw new Error(NO_ACTIVE_YEAR_MESSAGE);
+      yearId = year.id;
+      const [existing] = await tx
+        .select({ requiredWeeklyHours: teacherWeeklyHourRequirements.requiredWeeklyHours })
+        .from(teacherWeeklyHourRequirements)
+        .where(and(
+          eq(teacherWeeklyHourRequirements.schoolId, context.schoolId),
+          eq(teacherWeeklyHourRequirements.academicYearId, year.id),
+          eq(teacherWeeklyHourRequirements.teacherMembershipId, resolved.membershipId),
+        ))
+        .limit(1);
+      existingHours = existing?.requiredWeeklyHours ?? null;
+      // Required only when nothing is on file. A reactivated teacher keeps the
+      // figure they were given at approval.
+      if (!isSchedulable(existingHours) && input.requiredWeeklyHours === undefined) {
+        throw new Error(MISSING_HOURS_ON_APPROVAL_MESSAGE);
+      }
     }
 
     const now = new Date();
@@ -343,6 +412,19 @@ export async function setTeacherStatus(options: { headers: Headers; input: SetTe
 
     if (updated.length === 0) throw new Error("Teacher status changed concurrently. Reload the page and try again.");
 
+    // The hours are written after the status, inside the same transaction, so a
+    // failure to record them cannot leave an approved teacher without an
+    // obligation.
+    let requiredWeeklyHours = existingHours;
+    if (input.status === "ACTIVE" && yearId && input.requiredWeeklyHours !== undefined) {
+      requiredWeeklyHours = await upsertWeeklyHours(tx, {
+        schoolId: context.schoolId,
+        academicYearId: yearId,
+        teacherMembershipId: resolved.membershipId,
+        requiredWeeklyHours: input.requiredWeeklyHours,
+      });
+    }
+
     const decision = teacherDecisionFor(from, input.status);
     await writeAuditEvent(tx, {
       schoolId: context.schoolId,
@@ -356,10 +438,55 @@ export async function setTeacherStatus(options: { headers: Headers; input: SetTe
         from,
         to: input.status,
         targetUserId: resolved.userId,
+        ...(requiredWeeklyHours === null ? {} : { requiredWeeklyHours }),
       },
     });
 
-    return { registrationId: input.registrationId, status: input.status, decision };
+    return { registrationId: input.registrationId, status: input.status, decision, requiredWeeklyHours };
+  });
+}
+
+/**
+ * Records a teacher's mandatory weekly hours, or corrects an existing figure.
+ *
+ * Upserted rather than inserted, because the obligation is one number per teacher
+ * per academic year: a second call is a correction of the same fact, and letting
+ * two rows exist would make "what does this teacher owe" ambiguous.
+ */
+export async function setTeacherWeeklyHours(options: { headers: Headers; input: SetTeacherWeeklyHoursInput }) {
+  const context = await requireTeacherManagementAccess(options.headers);
+  const input = setTeacherWeeklyHoursSchema.parse(options.input);
+
+  return getDb().transaction(async (tx) => {
+    const resolved = await resolveRegistrationMembership(tx, context.schoolId, input.registrationId);
+    if (!resolved) throw new Error("This teacher has not registered yet.");
+    if (resolved.role !== "TEACHER") throw new Error("Teacher registration not found.");
+
+    const [year] = await tx
+      .select({ id: academicYears.id, name: academicYears.name })
+      .from(academicYears)
+      .where(and(eq(academicYears.schoolId, context.schoolId), eq(academicYears.status, "ACTIVE")))
+      .limit(1);
+    if (!year) throw new Error(NO_ACTIVE_YEAR_MESSAGE);
+
+    const requiredWeeklyHours = await upsertWeeklyHours(tx, {
+      schoolId: context.schoolId,
+      academicYearId: year.id,
+      teacherMembershipId: resolved.membershipId,
+      requiredWeeklyHours: input.requiredWeeklyHours,
+    });
+
+    await writeAuditEvent(tx, {
+      schoolId: context.schoolId,
+      actorUserId: context.userId,
+      actorMembershipId: context.membershipId,
+      action: "TEACHER_WEEKLY_HOURS_SET",
+      entityType: "SCHOOL_MEMBERSHIP",
+      entityId: resolved.membershipId,
+      metadata: { academicYearId: year.id, requiredWeeklyHours, targetUserId: resolved.userId },
+    });
+
+    return { registrationId: input.registrationId, requiredWeeklyHours };
   });
 }
 

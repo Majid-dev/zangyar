@@ -9,7 +9,6 @@ import type { ActionResult } from "@/lib/actions/result";
 import { formDataToObject, nullableString, optionalNumber } from "./form-data";
 import {
   archiveCatalogItemSchema,
-  assignTeacherSchema,
   createAcademicYearSchema,
   createClassroomSchema,
   createGradeSchema,
@@ -21,7 +20,6 @@ import {
 import {
   archiveGrade,
   archiveSubject,
-  assignTeacher,
   createAcademicYear,
   createClassroom,
   createGrade,
@@ -116,16 +114,4 @@ export async function createClassroomAction(_previous: unknown, formData: FormDa
     revalidateAcademics();
     return result;
   }, "کلاس ایجاد شد.");
-}
-
-export async function assignTeacherAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
-  return executeAction(async () => {
-    const raw = formDataToObject(formData);
-    const result = await assignTeacher({
-      headers: await headers(),
-      input: assignTeacherSchema.parse({ ...raw, subjectId: nullableString(formData.get("subjectId")), endDate: nullableString(formData.get("endDate")), isPrimary: formData.get("isPrimary") === "on" }),
-    });
-    revalidateAcademics();
-    return result;
-  }, "دبیر به کلاس تخصیص یافت.");
 }

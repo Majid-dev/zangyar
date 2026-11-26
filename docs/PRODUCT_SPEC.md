@@ -48,9 +48,8 @@ A school-owned contact record associated with one or more students. A guardian m
 - Create and close academic years.
 - Configure school-local grades and subjects.
 - Create classrooms within an academic year.
-- Assign teachers to multiple classrooms.
-- Support multiple teachers per classroom.
-- Keep subjects optional for classroom-teacher assignments; subject-specific attendance may require them later.
+- Assign a teacher and a subject to any set of a classroom's weekly teaching hours.
+- Support a period taught whole by one teacher, a period holding a single-hour lesson, and a period split between two teachers with two different subjects.
 - Close an academic year as one coordinated operation that archives active enrollments in that year, leaves student global status unchanged, rejects new operations for the closed year, and preserves all historical records.
 
 ### Student and guardian management
@@ -66,16 +65,29 @@ A school-owned contact record associated with one or more students. A guardian m
 - Allow explicit reactivation of withdrawn, graduated, or archived profiles without reopening prior enrollments or assigning a class.
 - Manage guardian contact details, relationship type, primary flag, SMS flag, and emergency flag through one profile edit submission.
 
+### Scheduling
+
+- Configure the school's shift: morning, afternoon, or rotating weekly (morning/afternoon).
+- For a rotating shift, configure a reference date that determines the rotation week, and calculate the applicable shift for any date from it.
+- Configure the school's operating weekdays.
+- Configure the school day as an ordered list of periods, each with a start and end time. A period is naturally two hours, and breaks are the gaps between periods rather than configured rows.
+- Assign a teacher and a subject to one teaching hour of a period, or to both of its hours at once.
+- Support a period whose two hours are two different lessons with two different teachers and subjects.
+- Record each teacher's mandatory weekly hours for an academic year, as part of approving them and editable afterwards.
+- Report assigned against required hours.
+- Refuse timetable assignment to a teacher whose mandatory hours are unset or zero, to a teacher who already teaches a selected hour in another classroom, and to an assignment that would take a teacher past their mandatory hours.
+- Refuse attendance on a non-operating day, on a date whose weekday does not match the assigned period, and outside the applicable school shift.
+
 ### Attendance
 
-- Record daily attendance by classroom and school-local business date.
+- Record attendance per teaching hour, for a classroom, subject, and school-local business date.
 - Support statuses: `PRESENT`, `ABSENT`, `LATE`, and `EXCUSED`.
-- Ensure at most one daily attendance session per classroom and date.
+- Ensure at most one attendance session per timetable slot and date.
 - Ensure one attendance record per enrolled student per session.
-- Permit same-day teacher corrections for assigned classrooms.
+- Permit same-day teacher corrections for periods they teach.
 - Permit School Admin corrections for any school date.
+- Enforce a submission deadline after each period.
 - Audit every attendance correction.
-- Design the session model for future lesson-level attendance.
 
 ### Classroom activities
 
@@ -105,7 +117,7 @@ A school-owned contact record associated with one or more students. A guardian m
 
 - As a School Admin, I can configure my school and academic year so staff can operate against the correct class structure.
 - As a School Admin, I can invite or assign teachers to my school without changing their global identity.
-- As a School Admin, I can create a classroom and assign several teachers to it.
+- As a School Admin, I can create a classroom and fill its weekly timetable with teachers and subjects.
 - As a School Admin, I can register a student, add multiple guardians, and enroll the student in a classroom.
 - As a Teacher, I can open one of my assigned classrooms and record attendance quickly for the current school-local date.
 - As a Teacher, I can record a classroom activity and mark outcomes for enrolled students.
@@ -135,8 +147,8 @@ A school-owned contact record associated with one or more students. A guardian m
 
 ### Daily attendance
 
-1. Teacher or School Admin opens an assigned classroom.
-2. The system loads or creates the single daily session for the school-local date.
+1. Teacher or School Admin opens one of the day's periods.
+2. The system loads or creates the single session for that period and the school-local date.
 3. The operator records one status per currently enrolled student.
 4. The transaction stores attendance and eligible notification outbox entries together.
 5. A separate process sends SMS and records provider results.
@@ -161,7 +173,7 @@ A school-owned contact record associated with one or more students. A guardian m
 6. Teachers can access only assigned classrooms unless authorized as School Admin; a School Admin membership is not also a Teacher membership.
 7. Historical academic-year records remain available after closure.
 8. Classroom transfers create effective-dated enrollment history with no overlapping enrollments for the same student and academic year.
-9. Daily attendance is unique by school, classroom, local date, and session kind.
+9. Attendance is unique by school, timetable slot, and local date.
 10. Attendance records reference valid enrollments from the same school and classroom and must fall within the enrollment's effective period.
 11. School Admins configure attendance notification triggers from the admin panel.
 12. Attendance submission never waits for SMS delivery.

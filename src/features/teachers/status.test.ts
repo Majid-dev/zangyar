@@ -158,3 +158,50 @@ describe("teacherRejectionAction", () => {
     expect(teacherRejectionAction(null)).toBeNull();
   });
 });
+
+describe("mandatory hours in the display status", () => {
+  it("reports an active teacher without hours as awaiting hours", () => {
+    expect(deriveTeacherDisplayStatus({
+      registrationStatus: "CLAIMED",
+      membershipStatus: "ACTIVE",
+      hoursOutstanding: true,
+    })).toBe("AWAITING_HOURS");
+  });
+
+  it("reports an active teacher with hours as plain active", () => {
+    expect(deriveTeacherDisplayStatus({
+      registrationStatus: "CLAIMED",
+      membershipStatus: "ACTIVE",
+      hoursOutstanding: false,
+    })).toBe("ACTIVE");
+  });
+
+  it("does not let hours change any state other than active", () => {
+    // The flag is a statement about configuration, not access, so it must not be
+    // able to make a pending, rejected, or deactivated teacher look different.
+    const statuses = ["PENDING_ADMIN_APPROVAL", "REJECTED", "SUSPENDED", "REVOKED"] as const;
+    for (const membershipStatus of statuses) {
+      expect(deriveTeacherDisplayStatus({ registrationStatus: "CLAIMED", membershipStatus, hoursOutstanding: true }))
+        .toBe(deriveTeacherDisplayStatus({ registrationStatus: "CLAIMED", membershipStatus, hoursOutstanding: false }));
+    }
+  });
+});
+
+describe("weekly hours on the status actions", () => {
+  it("asks for hours when approving, so approval cannot leave a teacher unconfigured", () => {
+    expect(teacherStatusAction("PENDING_ADMIN_APPROVAL")?.requiresWeeklyHours).toBe(true);
+    expect(teacherStatusAction("REJECTED")?.requiresWeeklyHours).toBe(true);
+  });
+
+  it("does not ask for hours when deactivating or reactivating", () => {
+    // A reactivated teacher keeps the figure already on file; re-entering it would
+    // invite an accidental change to something the admin did not come here to edit.
+    expect(teacherStatusAction("ACTIVE")?.requiresWeeklyHours).toBe(false);
+    expect(teacherStatusAction("SUSPENDED")?.requiresWeeklyHours).toBe(false);
+    expect(teacherStatusAction("REVOKED")?.requiresWeeklyHours).toBe(false);
+  });
+
+  it("never asks for hours on the rejection move", () => {
+    expect(teacherRejectionAction("PENDING_ADMIN_APPROVAL")?.requiresWeeklyHours).toBe(false);
+  });
+});

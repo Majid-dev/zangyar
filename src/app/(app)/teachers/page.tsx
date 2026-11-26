@@ -45,6 +45,8 @@ export default async function TeachersPage({ searchParams }: { searchParams: Pro
           status={filters.status}
           sort={filters.sort}
           dir={filters.dir}
+          activeAcademicYearId={data.activeAcademicYearId}
+          activeAcademicYearName={data.activeAcademicYearName}
         />
       </div>
     </AppPage>
