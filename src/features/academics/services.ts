@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { requireSchoolRole } from "@/lib/auth/authorization";
@@ -9,19 +9,16 @@ import { assertAcademicYearTransition, assertSchoolStatusTransition } from "./po
 
 import {
   academicYears,
-  classTeachers,
   classrooms,
   enrollments,
   grades,
   schoolSettings,
   schools,
-  schoolMemberships,
   subjects,
 } from "@/lib/db/schema";
 
 import {
   archiveCatalogItemSchema,
-  assignTeacherSchema,
   createAcademicYearSchema,
   createClassroomSchema,
   createGradeSchema,
@@ -30,7 +27,6 @@ import {
   updateSchoolConfigurationSchema,
   updateSchoolStatusSchema,
   type ArchiveCatalogItemInput,
-  type AssignTeacherInput,
   type CreateAcademicYearInput,
   type CreateClassroomInput,
   type CreateGradeInput,
@@ -296,53 +292,5 @@ export async function createClassroom(options: { headers: Headers; input: Create
       metadata: { academicYearId: classroom.academicYearId, gradeId: classroom.gradeId },
     });
     return classroom;
-  });
-}
-
-export async function assignTeacher(options: { headers: Headers; input: AssignTeacherInput }) {
-  const context = await requireOperationalAdmin(options.headers);
-  const input = assignTeacherSchema.parse(options.input);
-  const db = getDb();
-
-  return db.transaction(async (tx) => {
-    const [classroom] = await tx.select({ classroom: classrooms, year: academicYears }).from(classrooms)
-      .innerJoin(academicYears, and(eq(academicYears.id, classrooms.academicYearId), eq(academicYears.schoolId, context.schoolId)))
-      .where(and(eq(classrooms.id, input.classroomId), eq(classrooms.schoolId, context.schoolId)))
-      .limit(1);
-    if (!classroom || classroom.classroom.status === "ARCHIVED" || classroom.year.status === "CLOSED" || classroom.year.status === "ARCHIVED") {
-      throw new Error("Classroom is not available for teacher assignment.");
-    }
-    if (input.startDate < classroom.year.startDate || input.startDate >= classroom.year.endDate ||
-      (input.endDate && (input.endDate <= input.startDate || input.endDate > classroom.year.endDate))) {
-      throw new Error("Teacher assignment dates must fit within the academic year.");
-    }
-
-    const [teacher] = await tx.select({ id: schoolMemberships.id }).from(schoolMemberships).where(and(
-      eq(schoolMemberships.id, input.teacherMembershipId), eq(schoolMemberships.schoolId, context.schoolId),
-      eq(schoolMemberships.role, "TEACHER"), eq(schoolMemberships.status, "ACTIVE"),
-    )).limit(1);
-    if (!teacher) throw new Error("Teacher membership not found.");
-
-    if (input.subjectId) {
-      const [subject] = await tx.select({ id: subjects.id }).from(subjects).where(and(
-        eq(subjects.id, input.subjectId), eq(subjects.schoolId, context.schoolId), eq(subjects.status, "ACTIVE"),
-      )).limit(1);
-      if (!subject) throw new Error("Subject not found.");
-    }
-
-    const duplicate = await tx.select({ id: classTeachers.id }).from(classTeachers).where(and(
-      eq(classTeachers.schoolId, context.schoolId), eq(classTeachers.classroomId, input.classroomId),
-      eq(classTeachers.teacherMembershipId, input.teacherMembershipId),
-      input.subjectId ? eq(classTeachers.subjectId, input.subjectId) : isNull(classTeachers.subjectId),
-    )).limit(1);
-    if (duplicate.length > 0) throw new Error("Teacher is already assigned to this classroom and subject.");
-
-    const [assignment] = await tx.insert(classTeachers).values({ schoolId: context.schoolId, ...input }).returning();
-    await writeAuditEvent(tx, {
-      schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId,
-      action: "CLASSROOM_TEACHER_ASSIGNED", entityType: "CLASS_TEACHER", entityId: assignment.id,
-      metadata: { classroomId: assignment.classroomId, teacherMembershipId: assignment.teacherMembershipId },
-    });
-    return assignment;
   });
 }

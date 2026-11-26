@@ -18,7 +18,7 @@ export function AttendanceSummary({ summary }: { summary: AttendanceSummaryData 
 
   return (
     <Panel className="lg:col-span-7">
-      <SectionHeading eyebrow={`امروز · ${summary.date}`} title="وضعیت حضور مدرسه" description={`${numberFormat.format(summary.studentCount)} دانش‌آموز در ${numberFormat.format(summary.classroomCount)} کلاس ثبت شده‌اند.`} action={<StatusBadge status={summary.pendingClassroomCount > 0 ? "pending" : "active"} />} />
+      <SectionHeading eyebrow={`امروز · ${summary.date}`} title="وضعیت حضور مدرسه" description={`${numberFormat.format(summary.studentCount)} دانش‌آموز در ${numberFormat.format(summary.classroomCount)} کلاس؛ ${numberFormat.format(summary.periodCount)} زنگ امروز.`} action={<StatusBadge status={summary.pendingPeriodCount > 0 ? "pending" : "active"} />} />
       {total === 0 ? <div className="mt-6 rounded-xl bg-sage/60 p-5 text-sm leading-7 text-muted">هنوز حضور و غیابی برای امروز ثبت نشده است.</div> : <div className="mt-6 grid gap-6 sm:grid-cols-[minmax(0,1fr)_11rem] sm:items-center">
         <div>
           <div className="flex h-3 overflow-hidden rounded-full bg-sage" role="img" aria-label={`از ${numberFormat.format(total)} رکورد، ${numberFormat.format(present)} نفر حاضر هستند`}>
@@ -28,7 +28,7 @@ export function AttendanceSummary({ summary }: { summary: AttendanceSummaryData 
             {statusMeta.map((item) => <div key={item.key}><div className="flex items-center gap-2 text-xs text-muted"><span className={`size-2 rounded-full ${item.color}`} aria-hidden="true" />{item.label}</div><p className="mt-1 text-lg font-black tabular-nums text-primary">{numberFormat.format(summary.counts[item.key])}</p></div>)}
           </div>
         </div>
-        <div className="border-s border-border ps-5 text-center sm:text-start"><p className="text-xs font-bold text-muted">نرخ حضور</p><p className="mt-1 text-4xl font-black tracking-tight text-primary tabular-nums">{numberFormat.format(presentPercent)}<span className="text-xl">٪</span></p><p className="mt-2 text-xs leading-5 text-muted">{summary.pendingClassroomCount > 0 ? `${numberFormat.format(summary.pendingClassroomCount)} کلاس هنوز ثبت نشده` : "ثبت امروز کامل شده است"}</p></div>
+        <div className="border-s border-border ps-5 text-center sm:text-start"><p className="text-xs font-bold text-muted">نرخ حضور</p><p className="mt-1 text-4xl font-black tracking-tight text-primary tabular-nums">{numberFormat.format(presentPercent)}<span className="text-xl">٪</span></p><p className="mt-2 text-xs leading-5 text-muted">{summary.pendingPeriodCount > 0 ? `${numberFormat.format(summary.pendingPeriodCount)} زنگ هنوز ثبت نشده` : "ثبت امروز کامل شده است"}</p></div>
       </div>}
     </Panel>
   );

@@ -3,12 +3,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import type { ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import {
+  academicYears,
   accounts,
   auditLogs,
   platformAdmins,
@@ -18,6 +19,7 @@ import {
   sessions,
   teacherProfiles,
   teacherRegistrations,
+  teacherWeeklyHourRequirements,
   users,
 } from "@/lib/db/schema";
 import { getOtpConfig } from "@/lib/otp/config";
@@ -29,6 +31,7 @@ import {
   registerTeacherMobile,
   requestTeacherRegistrationCode,
   setTeacherStatus,
+  setTeacherWeeklyHours,
   updateRegistrationMobile,
   updateTeacher,
 } from "./services";
@@ -87,6 +90,16 @@ async function createSchoolAdmin(suffix: string): Promise<Actor> {
     .insert(schoolMemberships)
     .values({ schoolId: school.id, userId: body.user.id, role: "SCHOOL_ADMIN", status: "ACTIVE" })
     .returning({ id: schoolMemberships.id });
+  // Approval records the teacher's mandatory hours, and hours belong to a year, so
+  // every admin's school needs an active one to approve anybody at all.
+  await db.insert(academicYears).values({
+    schoolId: school.id,
+    code: "1405",
+    name: "سال تحصیلی ۱۴۰۵",
+    startDate: "2026-09-23",
+    endDate: "2027-06-21",
+    status: "ACTIVE",
+  });
 
   return {
     userId: body.user.id,
@@ -125,9 +138,12 @@ async function deleteSchool(schoolId: string) {
   const db = getDb();
   await db.delete(teacherRegistrations).where(eq(teacherRegistrations.schoolId, schoolId));
   await db.delete(teacherProfiles).where(eq(teacherProfiles.schoolId, schoolId));
+  // Hours reference the membership with a restrictive delete, so they go first.
+  await db.delete(teacherWeeklyHourRequirements).where(eq(teacherWeeklyHourRequirements.schoolId, schoolId));
   await db.delete(auditLogs).where(eq(auditLogs.schoolId, schoolId));
   await db.delete(schoolMemberships).where(eq(schoolMemberships.schoolId, schoolId));
   await db.delete(schoolSettings).where(eq(schoolSettings.schoolId, schoolId));
+  await db.delete(academicYears).where(eq(academicYears.schoolId, schoolId));
   await db.delete(schools).where(eq(schools.id, schoolId));
 }
 
@@ -136,6 +152,13 @@ async function deleteIdentity(userId: string) {
   await db.delete(auditLogs).where(eq(auditLogs.actorUserId, userId));
   await db.delete(sessions).where(eq(sessions.userId, userId));
   await db.delete(accounts).where(eq(accounts.userId, userId));
+  // Hours hang off the membership, which this delete also removes.
+  await db.delete(teacherWeeklyHourRequirements).where(
+    inArray(
+      teacherWeeklyHourRequirements.teacherMembershipId,
+      db.select({ id: schoolMemberships.id }).from(schoolMemberships).where(eq(schoolMemberships.userId, userId)),
+    ),
+  );
   await db.delete(schoolMemberships).where(eq(schoolMemberships.userId, userId));
   await db.delete(users).where(eq(users.id, userId));
 }
@@ -311,7 +334,7 @@ describe.skipIf(!canRun)("teacher registration", () => {
       .from(teacherRegistrations)
       .where(and(eq(teacherRegistrations.schoolId, admin.schoolId), eq(teacherRegistrations.phoneNumber, "09123330003")));
 
-    const result = await setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE" } });
+    const result = await setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE", requiredWeeklyHours: 18 } });
     expect(result.decision).toBe("APPROVED");
 
     const [membership] = await getDb()
@@ -330,14 +353,14 @@ describe.skipIf(!canRun)("teacher registration", () => {
     // Approval and activation are one transition, so activating an already-active
     // teacher is the same illegal move as approving them twice.
     await expect(
-      setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE" } }),
+      setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE", requiredWeeklyHours: 18 } }),
     ).rejects.toThrow("Invalid teacher status transition: ACTIVE to ACTIVE.");
   });
 
   it("refuses to approve a registration that has not been claimed", async () => {
     const registered = await registerTeacherMobile({ headers: admin.headers, input: { mobile: "09123330006" } });
     await expect(
-      setTeacherStatus({ headers: admin.headers, input: { registrationId: registered.registrationId, status: "ACTIVE" } }),
+      setTeacherStatus({ headers: admin.headers, input: { registrationId: registered.registrationId, status: "ACTIVE", requiredWeeklyHours: 18 } }),
     ).rejects.toThrow("This teacher has not registered yet.");
   });
 
@@ -362,7 +385,7 @@ describe.skipIf(!canRun)("teacher registration", () => {
       .where(and(eq(teacherRegistrations.schoolId, admin.schoolId), eq(teacherRegistrations.phoneNumber, "09123330007")));
 
     // Undoing a rejection is the approval transition, not a separate workflow.
-    const result = await setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE" } });
+    const result = await setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE", requiredWeeklyHours: 18 } });
     expect(result.decision).toBe("APPROVED");
 
     const [membership] = await getDb()
@@ -388,6 +411,8 @@ describe.skipIf(!canRun)("teacher registration", () => {
     expect(membership.status).toBe("SUSPENDED");
     expect(membership.suspendedAt).toBeTruthy();
 
+    // No figure is supplied: reactivation keeps the hours recorded at approval, so
+    // the transition must succeed without asking for them again.
     const reactivated = await setTeacherStatus({ headers: admin.headers, input: { registrationId: registration.id, status: "ACTIVE" } });
     expect(reactivated.decision).toBe("REACTIVATED");
     [membership] = await getDb()
@@ -600,7 +625,7 @@ describe.skipIf(!canRun)("teacher registration", () => {
     // Another school's registration is invisible, and cannot be acted on.
     expect(await getTeacherForContext(asContext(admin), foreign.id)).toBeNull();
     await expect(
-      setTeacherStatus({ headers: admin.headers, input: { registrationId: foreign.id, status: "ACTIVE" } }),
+      setTeacherStatus({ headers: admin.headers, input: { registrationId: foreign.id, status: "ACTIVE", requiredWeeklyHours: 18 } }),
     ).rejects.toThrow("This teacher has not registered yet.");
     // Nor can it be deleted: the row is resolved through the acting admin's school.
     await expect(
@@ -619,5 +644,109 @@ describe.skipIf(!canRun)("teacher registration", () => {
         createdByUserId: admin.userId,
       }),
     ).rejects.toThrow();
+  });
+
+  it("records the mandatory weekly hours as part of approval", async () => {
+    const userId = (await userIdFor("09123330003"))!;
+    const [membership] = await getDb()
+      .select({ id: schoolMemberships.id })
+      .from(schoolMemberships)
+      .where(and(eq(schoolMemberships.userId, userId), eq(schoolMemberships.schoolId, admin.schoolId)));
+
+    const [requirement] = await getDb()
+      .select({ requiredWeeklyHours: teacherWeeklyHourRequirements.requiredWeeklyHours })
+      .from(teacherWeeklyHourRequirements)
+      .where(and(
+        eq(teacherWeeklyHourRequirements.schoolId, admin.schoolId),
+        eq(teacherWeeklyHourRequirements.teacherMembershipId, membership.id),
+      ));
+    // Approval and the obligation are one decision, so the figure the dialog asked
+    // for is on file the moment the teacher is active.
+    expect(requirement?.requiredWeeklyHours).toBe(18);
+  });
+
+  it("refuses approval when no hours are supplied for a teacher who has none", async () => {
+    const { registrationId } = await registerAndClaim(admin, "09123330101", { firstName: "سمیرا", lastName: "کریمی" });
+
+    await expect(
+      setTeacherStatus({ headers: admin.headers, input: { registrationId, status: "ACTIVE" } }),
+    ).rejects.toThrow("ساعت موظفی");
+
+    // The membership must be untouched: a refused approval cannot half-apply.
+    const [registration] = await getDb()
+      .select({ membershipId: teacherRegistrations.membershipId })
+      .from(teacherRegistrations)
+      .where(eq(teacherRegistrations.id, registrationId));
+    const [membership] = await getDb()
+      .select({ status: schoolMemberships.status })
+      .from(schoolMemberships)
+      .where(eq(schoolMemberships.id, registration.membershipId!));
+    expect(membership.status).toBe("PENDING_ADMIN_APPROVAL");
+  });
+
+  it("reports an active teacher with no recorded hours as awaiting hours, not active", async () => {
+    // A teacher approved before the hours rule existed: active, unconfigured. This
+    // is the state the school is migrating out of, so it has to be visible.
+    const { registrationId, userId } = await registerAndClaim(admin, "09123330102", { firstName: "مینا", lastName: "رستمی" });
+    const [registration] = await getDb()
+      .select({ membershipId: teacherRegistrations.membershipId })
+      .from(teacherRegistrations)
+      .where(eq(teacherRegistrations.id, registrationId));
+    await getDb()
+      .update(schoolMemberships)
+      .set({ status: "ACTIVE" })
+      .where(eq(schoolMemberships.id, registration.membershipId!));
+
+    const detail = await getTeacherForContext(asContext(admin), registrationId);
+    expect(detail?.membershipStatus).toBe("ACTIVE");
+    expect(detail?.displayStatus).toBe("AWAITING_HOURS");
+    expect(detail?.schedulable).toBe(false);
+
+    // Setting the figure lifts the block without touching access.
+    await setTeacherWeeklyHours({ headers: admin.headers, input: { registrationId, requiredWeeklyHours: 12 } });
+    const updated = await getTeacherForContext(asContext(admin), registrationId);
+    expect(updated?.displayStatus).toBe("ACTIVE");
+    expect(updated?.schedulable).toBe(true);
+    expect(updated?.requiredWeeklyHours).toBe(12);
+
+    // Still the same membership and the same account: the edit was about a number.
+    const [membership] = await getDb()
+      .select({ status: schoolMemberships.status })
+      .from(schoolMemberships)
+      .where(eq(schoolMemberships.id, registration.membershipId!));
+    expect(membership.status).toBe("ACTIVE");
+    expect(userId).toBeDefined();
+  });
+
+  it("filters by awaiting-hours and active as separate states", async () => {
+    const context = asContext(admin);
+    const awaiting = await listTeachersForContext(context, teacherListFilterSchema.parse({ status: "AWAITING_HOURS", pageSize: 100 }));
+    const active = await listTeachersForContext(context, teacherListFilterSchema.parse({ status: "ACTIVE", pageSize: 100 }));
+
+    // Every awaiting-hours row is active-but-unconfigured, and no row is both.
+    expect(awaiting.rows.every((row) => row.membershipStatus === "ACTIVE" && !row.schedulable)).toBe(true);
+    expect(active.rows.every((row) => row.membershipStatus === "ACTIVE" && row.schedulable)).toBe(true);
+    const awaitingIds = new Set(awaiting.rows.map((row) => row.registrationId));
+    expect(active.rows.some((row) => awaitingIds.has(row.registrationId))).toBe(false);
+  });
+
+  it("refuses to record hours for a teacher who has not registered", async () => {
+    const pending = await registerTeacherMobile({ headers: admin.headers, input: { mobile: "09123330103" } });
+    await expect(
+      setTeacherWeeklyHours({ headers: admin.headers, input: { registrationId: pending.registrationId, requiredWeeklyHours: 16 } }),
+    ).rejects.toThrow("This teacher has not registered yet.");
+  });
+
+  it("refuses hours edits from another school's admin", async () => {
+    const [registration] = await getDb()
+      .select({ id: teacherRegistrations.id })
+      .from(teacherRegistrations)
+      .where(and(eq(teacherRegistrations.schoolId, admin.schoolId), eq(teacherRegistrations.phoneNumber, "09123330003")));
+
+    // The registration is resolved through the acting admin's own school, so a
+    // foreign admin cannot reach it even with the correct id.
+    await expect(
+      setTeacherWeeklyHours({ headers: otherAdmin.headers, input: { registrationId: registration.id, requiredWeeklyHours: 40 } }),
+    ).rejects.toThrow("This teacher has not registered yet.");
   });
 });

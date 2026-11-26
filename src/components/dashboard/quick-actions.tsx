@@ -2,9 +2,9 @@ import Link from "next/link";
 
 import { Panel, SectionHeading } from "@/components/ui/panel";
 
-export function QuickActions({ pendingClassroomCount }: { pendingClassroomCount: number }) {
+export function QuickActions({ pendingPeriodCount }: { pendingPeriodCount: number }) {
   const actions = [
-    { label: "ثبت حضور و غیاب", detail: pendingClassroomCount === 0 ? "بررسی وضعیت امروز" : `${pendingClassroomCount} کلاس منتظر ثبت`, href: "/attendance", variant: "primary" as const },
+    { label: "ثبت حضور و غیاب", detail: pendingPeriodCount === 0 ? "بررسی وضعیت امروز" : `${pendingPeriodCount} زنگ منتظر ثبت`, href: "/attendance", variant: "primary" as const },
     { label: "افزودن دانش‌آموز", detail: "ثبت یک دانش‌آموز جدید", href: "/students/new", variant: "secondary" as const },
   ];
   return (

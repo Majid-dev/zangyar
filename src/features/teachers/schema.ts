@@ -3,6 +3,8 @@ import { z } from "zod";
 import { toAsciiDigits } from "@/lib/digits";
 import { isValidIranianMobile, normalizeIranianMobile } from "@/lib/mobile";
 
+import { MAXIMUM_WEEKLY_HOURS, MINIMUM_WEEKLY_HOURS } from "./hours";
+
 const uuid = z.string().uuid();
 
 /**
@@ -24,6 +26,27 @@ const personnelCode = z.preprocess(
 );
 
 const personName = z.string().trim().min(1, "این فیلد الزامی است.").max(100);
+
+/**
+ * A teacher's mandatory weekly teaching hours.
+ *
+ * Preprocessed from the form's string and accepted in Persian or Latin digits,
+ * because an admin typing into a number field on a Persian keyboard produces
+ * either. The bounds come from `hours.ts` so the rule has one home and the message
+ * the admin reads matches the rule the domain applies.
+ */
+const weeklyHours = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const normalized = toAsciiDigits(value).replace(/\s/g, "");
+    return normalized.length === 0 ? undefined : Number(normalized);
+  },
+  z
+    .number({ message: "ساعت موظفی هفتگی را وارد کنید." })
+    .int("ساعت موظفی باید عدد صحیح باشد.")
+    .min(MINIMUM_WEEKLY_HOURS, `ساعت موظفی هفتگی باید حداقل ${MINIMUM_WEEKLY_HOURS} ساعت باشد.`)
+    .max(MAXIMUM_WEEKLY_HOURS, `ساعت موظفی هفتگی نمی‌تواند بیشتر از ${MAXIMUM_WEEKLY_HOURS} ساعت باشد.`),
+);
 
 const password = z
   .string()
@@ -59,16 +82,37 @@ export const updateTeacherSchema = z.object({
 });
 
 /**
+ * Recording a teacher's mandatory weekly hours.
+ *
+ * Separate from the status transition even though approval also writes a figure,
+ * because editing the obligation later is a manager's routine correction, while
+ * approval is an access decision — and only the second one has a membership state
+ * to move. Sharing a schema would force every hours edit to carry a status it does
+ * not intend to change.
+ */
+export const setTeacherWeeklyHoursSchema = z.object({
+  registrationId: uuid,
+  requiredWeeklyHours: weeklyHours,
+});
+
+/**
  * The one status transition a School Admin performs on a teacher.
  *
  * Approval, rejection, deactivation, and reactivation are the same operation —
  * "move this teacher's access to that status" — so they share one schema and one
  * service. Which targets are legal from a given status is decided by the
  * transition matrix in `./status`, not here, so the rule has exactly one home.
+ *
+ * `requiredWeeklyHours` is optional and only read when the target is `ACTIVE`:
+ * approval is where the obligation is first recorded, so the field rides along
+ * with the transition rather than being a second request. A rejection or
+ * deactivation that happens to carry it is ignored, which keeps one round trip
+ * possible for the common "approve with hours" case.
  */
 export const setTeacherStatusSchema = z.object({
   registrationId: uuid,
   status: z.enum(["ACTIVE", "SUSPENDED", "REJECTED"]),
+  requiredWeeklyHours: weeklyHours.optional(),
 });
 
 /** Public registration, step 1. Carries no tenant information by design. */
@@ -109,6 +153,7 @@ export const sortDirectionSchema = z.enum(["asc", "desc"]);
 export const teacherDisplayStatusSchema = z.enum([
   "PENDING_REGISTRATION",
   "PENDING_ADMIN_APPROVAL",
+  "AWAITING_HOURS",
   "ACTIVE",
   "REJECTED",
   "DEACTIVATED",
@@ -134,5 +179,6 @@ export type RegisterTeacherMobileInput = z.input<typeof registerTeacherMobileSch
 export type UpdateRegistrationMobileInput = z.input<typeof updateRegistrationMobileSchema>;
 export type UpdateTeacherInput = z.input<typeof updateTeacherSchema>;
 export type SetTeacherStatusInput = z.input<typeof setTeacherStatusSchema>;
+export type SetTeacherWeeklyHoursInput = z.input<typeof setTeacherWeeklyHoursSchema>;
 export type CompleteTeacherRegistrationInput = z.input<typeof completeTeacherRegistrationSchema>;
 export type TeacherListFilter = z.infer<typeof teacherListFilterSchema>;

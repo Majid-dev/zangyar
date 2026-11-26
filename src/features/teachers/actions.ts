@@ -16,6 +16,7 @@ import {
   registerTeacherMobile,
   requestTeacherRegistrationCode,
   setTeacherStatus,
+  setTeacherWeeklyHours,
   updateRegistrationMobile,
   updateTeacher,
 } from "./services";
@@ -25,6 +26,7 @@ import {
   registerTeacherMobileSchema,
   requestTeacherRegistrationCodeSchema,
   setTeacherStatusSchema,
+  setTeacherWeeklyHoursSchema,
   updateRegistrationMobileSchema,
   updateTeacherSchema,
 } from "./schema";
@@ -90,6 +92,21 @@ export const setTeacherStatusAction: FormAction<unknown> = async (_previous, for
     revalidateTeachers(parsed.registrationId);
     return outcome;
   }).then((result) => (result.ok ? { ...result, message: TEACHER_DECISION_MESSAGES[result.data.decision] } : result));
+
+/**
+ * Recording or correcting a teacher's mandatory weekly hours.
+ *
+ * Separate from the status action because editing the obligation is routine
+ * management rather than an access decision — a School Admin raising a teacher
+ * from twelve hours to eighteen must not also be moving their membership.
+ */
+export const setTeacherWeeklyHoursAction: FormAction<unknown> = async (_previous, formData) =>
+  executeAction(async () => {
+    const parsed = setTeacherWeeklyHoursSchema.parse(formDataToObject(formData));
+    const result = await setTeacherWeeklyHours({ headers: await headers(), input: parsed });
+    revalidateTeachers(parsed.registrationId);
+    return result;
+  }, "ساعت موظفی هفتگی دبیر ثبت شد.");
 // --- Public registration -----------------------------------------------------------
 
 /**

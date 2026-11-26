@@ -6,7 +6,7 @@ The repository includes migration validation scripts for the current Drizzle sch
 
 Run `corepack pnpm db:test-clean`.
 
-The script creates an ephemeral PostgreSQL database, applies the committed Drizzle migrations, verifies the Better Auth, school, membership, academic-year, and classroom tables, then drops the temporary database. The configured `DATABASE_URL` is used only to connect to PostgreSQL and is not modified.
+The script creates an ephemeral PostgreSQL database, applies the committed Drizzle migrations, verifies the Better Auth, school, membership, academic-year, classroom, shift, period, operating-day, timetable, and teacher-hour tables, asserts that the superseded `class_teachers` table, the `attendance_session_kind` enum, and the per-assignment `period_assignment_scope` and `timetable_rotation` enums are gone, and that the hour-slot timetable columns exist while `scope`, `hour_count`, the partner teacher, the rotation, and the classroom's homeroom teacher are gone. It then drops the temporary database. The configured `DATABASE_URL` is used only to connect to PostgreSQL and is not modified.
 
 ## Authentication, demo seed, and tenant isolation
 
@@ -33,7 +33,13 @@ This command creates an isolated ephemeral database, applies migrations, runs th
 ## Phase 6 persisted integration tests
 Run `corepack pnpm test:integration:phase6`.
 
-This command creates an isolated ephemeral database, applies migrations, runs persisted attendance tests, then drops the temporary database. It verifies daily session and record persistence, school notification policy evaluation, eligible guardian filtering, recipient/policy snapshots, pending outbox intent, and same-status idempotency. SMS delivery, retries, and provider logs remain Phase 8 coverage.
+This command creates an isolated ephemeral database, applies migrations, runs persisted attendance tests, then drops the temporary database. It verifies per-hour session and record persistence (the two hours of one period on one date are two sessions), school notification policy evaluation, eligible guardian filtering, recipient/policy snapshots naming the subject, pending outbox intent, same-status idempotency, the school's submission window, refusal of a non-operating weekday, refusal of a slot from another school, that a split period's second hour records its own teacher and subject, and that each assignment counts as one mandatory hour for the teacher it names. SMS delivery, retries, and provider logs remain Phase 8 coverage.
+
+## Timetable assignment persisted integration tests
+
+Run `corepack pnpm test:integration:scheduling`.
+
+This command creates an isolated ephemeral database, applies migrations, runs the persisted assignment suite, then drops the temporary database. It verifies that a period's two hours with the same teacher and subject read as one joined full lesson, that a period's two hours with different teachers and subjects read as two separate lessons, and that each counts one hour for the teacher it names. Refusals are covered as one operation: a teacher already teaching a selected hour in another classroom, a teacher with no recorded mandatory hours, a teacher from another school who holds hours there, an assignment that would exceed the teacher's mandatory hours, and an hour on a day the school does not operate. It also verifies that re-saving a teacher's own hour is not counted twice against their limit, that clearing hours frees the cells and stops counting them, and that raising a teacher's mandatory figure is what lets more be assigned.
 
 ## Teacher registration persisted integration tests
 

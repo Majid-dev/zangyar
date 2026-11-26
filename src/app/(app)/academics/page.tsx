@@ -8,7 +8,7 @@ type AcademicSection = {
   href: string;
   title: string;
   description: string;
-  icon: "school" | "calendar" | "catalog" | "classroom";
+  icon: "school" | "calendar" | "catalog" | "classroom" | "shift" | "timetable" | "hours";
 };
 
 const sections: readonly AcademicSection[] = [
@@ -32,9 +32,27 @@ const sections: readonly AcademicSection[] = [
   },
   {
     href: "/academics/classrooms",
-    title: "کلاس‌ها و دبیران",
-    description: "کلاس بسازید و دبیران را به آن‌ها تخصیص دهید.",
+    title: "کلاس‌ها",
+    description: "کلاس بسازید و برنامه هفتگی هر کلاس را تکمیل کنید.",
     icon: "classroom",
+  },
+  {
+    href: "/academics/shifts",
+    title: "شیفت‌ها و زنگ‌ها",
+    description: "روزهای فعالیت، تعداد زنگ‌ها و شیفت چرخشی مدرسه را تنظیم کنید.",
+    icon: "shift",
+  },
+  {
+    href: "/academics/timetable",
+    title: "برنامه هفتگی",
+    description: "درس و دبیر هر زنگ هفته را برای هر کلاس تعیین کنید.",
+    icon: "timetable",
+  },
+  {
+    href: "/academics/hours",
+    title: "ساعت موظفی دبیران",
+    description: "ساعت تخصیص‌یافته هر دبیر را با ساعت موظفی او مقایسه کنید.",
+    icon: "hours",
   },
 ];
 
@@ -83,6 +101,15 @@ function AcademicIcon({ name }: { name: AcademicSection["icon"] }) {
   }
   if (name === "catalog") {
     return <svg {...common}><path d="M4 4.5h6a2 2 0 0 1 2 2V20a2 2 0 0 0-2-2H4z" /><path d="M20 4.5h-6a2 2 0 0 0-2 2V20a2 2 0 0 1 2-2h6z" /><path d="M7 8h2M15 8h2M7 12h2M15 12h2" /></svg>;
+  }
+  if (name === "shift") {
+    return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /><path d="M12 3.5v1.5M20.5 12H19M12 20.5V19M3.5 12H5" /></svg>;
+  }
+  if (name === "timetable") {
+    return <svg {...common}><rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9.5h18M9 9.5V20.5M15 9.5V20.5" /></svg>;
+  }
+  if (name === "hours") {
+    return <svg {...common}><path d="M4 19.5h16" /><rect x="6" y="12" width="3" height="7.5" rx="1" /><rect x="11" y="8" width="3" height="11.5" rx="1" /><rect x="16" y="5" width="3" height="14.5" rx="1" /></svg>;
   }
   return <svg {...common}><path d="M3 19.5h18M5 19.5V8h14v11.5M8 8V5h8v3M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01" /></svg>;
 }

@@ -28,9 +28,15 @@ erDiagram
     SCHOOLS ||--o{ SUBJECTS : defines
     ACADEMIC_YEARS ||--o{ CLASSROOMS : contains
     GRADES ||--o{ CLASSROOMS : categorizes
-    CLASSROOMS ||--o{ CLASS_TEACHERS : has
-    SCHOOL_MEMBERSHIPS ||--o{ CLASS_TEACHERS : assigned
-    SUBJECTS ||--o{ CLASS_TEACHERS : optionally_teaches
+
+    SCHOOLS ||--o{ SCHOOL_PERIODS : sequences
+    SCHOOLS ||--o{ SCHOOL_OPERATING_DAYS : operates_on
+    CLASSROOMS ||--o{ TIMETABLE_ENTRIES : scheduled
+    SCHOOL_PERIODS ||--o{ TIMETABLE_ENTRIES : occupies
+    SCHOOL_MEMBERSHIPS ||--o{ TIMETABLE_ENTRIES : teaches
+    SUBJECTS ||--o{ TIMETABLE_ENTRIES : taught_in
+    SCHOOL_MEMBERSHIPS ||--o{ TEACHER_WEEKLY_HOUR_REQUIREMENTS : owes
+    ACADEMIC_YEARS ||--o{ TEACHER_WEEKLY_HOUR_REQUIREMENTS : scopes
 
     SCHOOLS ||--o{ STUDENTS : owns
     SCHOOLS ||--o{ GUARDIANS : owns
@@ -41,6 +47,7 @@ erDiagram
     ACADEMIC_YEARS ||--o{ ENROLLMENTS : governs
 
     CLASSROOMS ||--o{ ATTENDANCE_SESSIONS : has
+    TIMETABLE_ENTRIES ||--o{ ATTENDANCE_SESSIONS : occurs_as
     ATTENDANCE_SESSIONS ||--o{ ATTENDANCE_RECORDS : contains
     ENROLLMENTS ||--o{ ATTENDANCE_RECORDS : receives
     CLASSROOMS ||--o{ CLASS_ACTIVITIES : hosts
@@ -76,7 +83,11 @@ erDiagram
 | `grades` | School | A school has many grade definitions; archive rather than delete when referenced. |
 | `classrooms` | School and academic year | A classroom belongs to one academic year and grade; historical classrooms remain available for reporting. |
 | `subjects` | School | School-local catalog; archive when no longer offered. |
-| `class_teachers` | School | Many-to-many classroom/teacher assignment, optionally subject-specific; assignment may have dates. |
+| `school_settings` shift | School | The school's own timetable shape lives on its settings row: `shiftType` (morning, afternoon, or rotating weekly) and, for a rotating school, `rotationBaseDate`. One row per school, because a school has one period list and a period list belongs to one shift. |
+| `school_periods` | School | One position in the school day: an `ordinal`, a `startTime`, and an `endTime`. No kind and no label — a period is identified by its place and described by its times, and breaks are not modelled at all. A period is naturally two hours. |
+| `school_operating_days` | School | The weekdays the school runs on, one row per day, numbered 1 (Saturday) through 7 (Friday). Presence of the row is the fact. |
+| `timetable_entries` | School, academic year, and classroom | One teaching hour: classroom, weekday, period, which hour of that period, subject, and the one teacher who holds it. Two entries per period are its two hours, so a period is a full lesson when both name the same teacher and subject and a split one when they differ. Unique per classroom hour, so a class cannot be double-booked. Archived rather than deleted once attendance references it. |
+| `teacher_weekly_hour_requirements` | School and academic year | One mandatory weekly hour figure per teacher per academic year. This is the scheduling gate: a teacher with no row, or a row of zero, cannot be given timetable slots. Approval records the figure, and it can be corrected from the teacher's page. |
 
 ### Students and guardians
 
@@ -91,7 +102,7 @@ erDiagram
 
 | Entity | Ownership | Cardinality and lifecycle |
 |---|---|---|
-| `attendance_sessions` | School and classroom | One daily session per classroom/local date in the MVP; session kind permits future lesson-level sessions. |
+| `attendance_sessions` | School, classroom, and timetable hour | One session per timetable entry per business date, so a class has one session per teaching hour it meets. Names the responsible teacher and subject directly, and stores the submission deadline it was created under. |
 | `attendance_records` | School and session/enrollment | One status per enrollment in a session; corrections update the record and create audit history. |
 | `class_activities` | School and classroom | Classroom event with date/category/description; may be archived. |
 | `activity_records` | School and activity/enrollment | One student outcome per activity/enrollment. |
@@ -154,9 +165,31 @@ Use school-local codes. Recommended uniqueness:
 
 A classroom references an academic year and grade from the same school through composite foreign keys.
 
-### `class_teachers`
+### `school_settings` shift, `school_periods`, and `school_operating_days`
 
-References a classroom and a teacher membership from the same school. The membership must have a teacher-capable role. Optional subject reference must also be same-school. Recommended uniqueness is `(schoolId, classroomId, teacherMembershipId, subjectId)` with a clear null-subject strategy.
+The school's shift is two columns on its settings row rather than a table. `shiftType` is `MORNING`, `AFTERNOON`, or `ROTATING`, and `rotationBaseDate` is set exactly when the shift rotates — enforced by a check — because a fixed shift has no rotation to anchor. The week containing the base date is a morning week and each following week alternates, so which shift is in session on a date is reproducible from the row rather than from when it was configured. A school has one period list and a period list belongs to one shift, so a table of shifts would have held either a single row or a set of rows sharing one period list; putting the two columns here instead is what keeps the model honest.
+
+`school_periods` carries `schoolId`, `ordinal`, `startTime`, and `endTime`. Unique `(schoolId, ordinal)`, checked `startTime < endTime` and `ordinal > 0`. There is deliberately no kind, no label, and no hour count: a period is a position in the day described by when it starts and ends, and the gap between one period's end and the next one's start *is* the break, so nothing has to be configured to express it. A period is naturally two hours; how many of them an assignment consumes is the assignment's business, not the period's.
+
+`school_operating_days` carries `schoolId` and `dayOfWeek`, primary keyed on both, with 1 = Saturday through 7 = Friday enforced by a check. Storing the set as rows rather than as seven booleans keeps it queryable and orderable like every other relationship here.
+
+A period is deleted only while no timetable assignment references it — a mistyped time is configuration and removable, whereas a period that has been scheduled is record. Operating days cannot be reduced while an assignment names a removed day, or while any attendance exists; both are refusals with a sentence rather than a silent partial state.
+
+### `timetable_entries`
+
+Carries `schoolId`, `academicYearId`, `classroomId`, `periodId`, `dayOfWeek`, `hourIndex`, `subjectId`, `teacherMembershipId`, and `status`. Unique `(schoolId, classroomId, dayOfWeek, periodId, hourIndex)` is the double-booking guard: a class occupies each hour of a slot once. There is no `shiftId`: the school has one period list, so a period already implies its shift.
+
+`hourIndex` is 1 or 2, checked, because a period holds exactly two hours. That single column is what replaced the `scope`, `hourCount`, `partnerTeacherMembershipId`, `rotation`, and `rotationBaseDate` columns of the previous shape: those all existed to describe how one row covered a period, and numbering the row's hour makes the question disappear. A full lesson is two rows that name the same teacher and subject; a single hour is one row; a period split between two lessons is two rows that differ. Nothing records which of the three a period is, because the rows already say, and no two of them can disagree.
+
+Composite foreign keys pin the entry to one school throughout: the classroom is tied to both the school and the academic year, the period to the school, the subject to the school, and the teacher to a same-school membership. The teacher-role and mandatory-hours requirements are enforced in the service layer, since a foreign key cannot express either. The mandatory-hours limit is checked against the hours the teacher *would* hold after the write, so re-saving a cell they already own is not read as a new hour.
+
+This table absorbed what `class_teachers` used to hold. An assignment with only a date range could not answer when a teacher teaches or how many hours that is worth, and its `subjectId`/`isPrimary` pair described two different relationships in one row. The homeroom teacher that briefly lived on `classrooms` is gone as well: a class names no teacher of its own, because every teacher relationship it has is one of the hours inside it, and teacher access to a classroom is that membership alone.
+
+### `teacher_weekly_hour_requirements`
+
+Carries `schoolId`, `academicYearId`, `teacherMembershipId`, and `requiredWeeklyHours`, unique on `(schoolId, teacherMembershipId, academicYearId)` and checked non-negative. Per year rather than per profile, because the obligation is agreed for a year and storing it on the profile would rewrite history every September. Assigned hours are never stored: they are counted from the year's active timetable entries, one hour per entry that names the teacher, so the report cannot drift from the schedule it describes — and because an entry is an hour, the count needs no arithmetic that could disagree with the rows.
+
+The figure is written in two places and neither is a duplicate of the other: `setTeacherStatus` records it inside the approval transaction, so approving a teacher cannot leave them unconfigured, and `setTeacherWeeklyHours` corrects it later, which is how a teacher approved before the rule existed is brought into line. Both require the school to have an `ACTIVE` academic year, because the obligation belongs to a year. Zero and missing are the same answer to the gate — see `src/features/teachers/hours.ts` — so a school that owes a teacher nothing should leave the row absent rather than record a zero that would read identically while implying a decision was made. The same figure is the ceiling the assignment service enforces, so a teacher cannot be scheduled past what the school recorded for them.
 
 ### `students`
 
@@ -172,11 +205,17 @@ References school, student, academic year, and classroom and includes `startDate
 
 ### `attendance_sessions`
 
-References school, classroom, academic year, local business date, session kind, creator membership, and status. Recommended unique `(schoolId, classroomId, businessDate, sessionKind)` for daily uniqueness. The session should retain its academic year even if the classroom configuration later changes. Teachers may correct same-day records for assigned classrooms; School Admins may correct records for any school date. All corrections are audited.
+References school, classroom, academic year, timetable entry, subject, business date, responsible teacher membership, creator membership, and status, plus `submissionDeadlineAt`. Unique `(schoolId, timetableEntryId, businessDate)`: attendance is recorded per teaching hour, so a class has one session for each hour it meets rather than one per day, and the two hours of a period are two sessions because they may be two different lessons.
+
+The session carries `subjectId` and `teacherMembershipId` explicitly rather than leaving them to be derived from the timetable, because the assignment a session belongs to can be re-pointed at a different teacher or lesson, and the record of who owed the submission must not move when the timetable is later edited. It retains its academic year even if the classroom configuration changes.
+
+`submissionDeadlineAt` is computed at session creation from the school's `attendanceSubmissionMinutes` window and the period's end time, resolved in the school's timezone, and stored rather than derived: the deadline a teacher was working to must not shift when the school later edits its timetable or its policy. A School Admin is exempt from the deadline — correction is their job — but not from the shift and weekday rules, since a period that never happened has nothing to correct.
+
+There is no session-kind column: the daily/lesson enum existed for a future that has arrived, and per-hour sessions made it redundant, so it was dropped rather than left holding a value nothing produces.
 
 ### `attendance_records`
 
-References school, session, enrollment, and classroom. Recommended unique `(schoolId, attendanceSessionId, enrollmentId)`. Composite constraints should prevent a record for an enrollment from another school or classroom. Status is one of `PRESENT`, `ABSENT`, `LATE`, or `EXCUSED`. Teachers may correct same-day records for assigned classrooms; School Admins may correct records for any school date. Corrections are audited.
+References school, session, enrollment, and classroom. Recommended unique `(schoolId, attendanceSessionId, enrollmentId)`. Composite constraints prevent a record for an enrollment from another school or classroom. Status is one of `PRESENT`, `ABSENT`, `LATE`, or `EXCUSED`. Teachers may correct same-day records for the periods they hold; School Admins may correct records for any school date. Corrections are audited.
 
 ### `class_activities` and `activity_records`
 
@@ -208,7 +247,9 @@ Include nullable school, actor user, optional actor membership, action, entity t
 | `otp_challenges` | Yes (nullable) | Nullable composite reference for tenant-scoped purposes; null for login and password reset, which are not tenant-bound. |
 | `academic_years`, `grades`, `subjects` | Yes | School-scoped unique codes. |
 | `classrooms` | Yes | Composite references to school/year/grade. |
-| `class_teachers` | Yes | Same-school classroom/membership/subject references. |
+| `school_periods`, `school_operating_days` | Yes | School-scoped period list keyed on `(schoolId, ordinal)`, and an operating-day set keyed on `(schoolId, dayOfWeek)`. |
+| `timetable_entries` | Yes | Same-school classroom/year, period, subject, and teacher composite references. |
+| `teacher_weekly_hour_requirements` | Yes | Same-school membership and academic-year composite references. |
 | `students`, `guardians` | Yes | School-scoped identity and contact constraints. |
 | `student_guardians` | Yes | Same-school student and guardian composite references. |
 | `enrollments` | Yes | Same-school student/classroom/year composite references. |
@@ -242,8 +283,10 @@ otp_challenges(purpose, phone_number, created_at) -- partial unique pending per 
 otp_challenges(expires_at) -- for later cleanup of lapsed challenges
 academic_years(school_id, status)
 classrooms(school_id, academic_year_id, grade_id)
-class_teachers(school_id, teacher_membership_id)
-class_teachers(school_id, classroom_id)
+school_periods(school_id, ordinal)
+timetable_entries(school_id, teacher_membership_id, status)
+timetable_entries(school_id, classroom_id, day_of_week)
+teacher_weekly_hour_requirements(school_id, academic_year_id)
 students(school_id, admission_number)
 students(school_id, status)
 guardians(school_id, normalized_mobile) -- partial unique index where normalized_mobile is not null
@@ -253,6 +296,8 @@ enrollments(school_id, academic_year_id, classroom_id)
 enrollments(school_id, student_id, academic_year_id, start_date)
 -- exclusion constraint prevents overlapping student/year enrollment ranges
 attendance_sessions(school_id, classroom_id, business_date)
+attendance_sessions(school_id, teacher_membership_id, business_date)
+attendance_sessions(school_id, status, submission_deadline_at)
 attendance_records(school_id, attendance_session_id)
 attendance_records(school_id, enrollment_id)
 class_activities(school_id, classroom_id, activity_date)
@@ -273,7 +318,11 @@ audit_logs(actor_user_id, occurred_at)
 - Teachers may correct same-day attendance for assigned classrooms; School Admins may correct any school date; all corrections are audited.
 - National ID is optional and, when present, is unique within the school.
 - User-facing Persian-calendar dates are converted to Gregorian dates before storage.
-- Subjects are optional for classroom-teacher assignments.
+- Subject teachers belong to the weekly timetable, not to a classroom-level assignment record; a classroom names no teacher of its own.
+- A period is naturally two hours and carries no kind, label, or duration of its own; breaks are gaps between periods rather than configured rows.
+- An assignment is one teaching hour: a period holds two of them, so a period taught whole is two rows naming the same teacher and subject and a period split between two lessons is two rows that differ.
+- A rotating school's shift alternates weekly from a stored base date, and the shift that actually ran is recorded on each attendance session.
+- A school's week runs Saturday (1) through Friday (7).
 - Operational records use archive/status transitions instead of destructive deletion in the MVP.
 - Formal guardian-consent workflows are deferred; SMS eligibility remains explicit on the student-guardian relationship.
 - Student lifecycle uses `ACTIVE`, `WITHDRAWN`, `GRADUATED`, and `ARCHIVED`; non-active profiles may be explicitly reactivated, which changes only global profile status and never reopens enrollments or assigns a classroom.

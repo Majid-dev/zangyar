@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { assertAcademicYearTransition, assertSchoolStatusTransition } from "./policy";
-import { assignTeacherSchema, createAcademicYearSchema } from "./schema";
+import { createAcademicYearSchema } from "./schema";
 
 describe("academic lifecycle rules", () => {
   it("allows the supported academic-year lifecycle", () => {
@@ -27,16 +27,6 @@ describe("academic lifecycle rules", () => {
       name: "سال تحصیلی",
       startDate: "2027-06-21",
       endDate: "2026-09-23",
-    })).toThrow();
-  });
-
-  it("rejects invalid teacher assignment windows", () => {
-    expect(() => assignTeacherSchema.parse({
-      classroomId: "11111111-1111-4111-8111-111111111111",
-      teacherMembershipId: "22222222-2222-4222-8222-222222222222",
-      startDate: "2027-01-01",
-      endDate: "2026-01-01",
-      isPrimary: false,
     })).toThrow();
   });
 });

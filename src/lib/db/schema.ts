@@ -11,6 +11,7 @@ import {
   pgTable,
   primaryKey,
   text,
+  time,
   timestamp,
   unique,
   uniqueIndex,
@@ -41,7 +42,15 @@ export const otpPurpose = pgEnum("otp_purpose", ["TEACHER_ACTIVATION", "TEACHER_
 export const otpChallengeStatus = pgEnum("otp_challenge_status", ["PENDING", "CONSUMED", "REVOKED", "EXHAUSTED"]);
 export const recordStatus = pgEnum("record_status", ["ACTIVE", "ARCHIVED"]);
 export const studentStatus = pgEnum("student_status", ["ACTIVE", "WITHDRAWN", "GRADUATED", "ARCHIVED"]);
-export const attendanceSessionKind = pgEnum("attendance_session_kind", ["DAILY", "LESSON"]);
+// The school's schedule shape: a fixed morning or afternoon shift, or the two
+// alternating by week. Stored rather than derived so a rotating school is
+// expressible as data, and so the rotation anchor has something to be conditional
+// on — see `school_settings`.
+export const schoolShiftKind = pgEnum("school_shift_kind", ["MORNING", "AFTERNOON", "ROTATING"]);
+// The shift a session actually ran in. A rotating school alternates between the
+// two week by week, so this cannot be read off the configuration row alone; it is
+// recorded on the session so a past register keeps its own answer.
+export const applicableShift = pgEnum("applicable_shift", ["MORNING", "AFTERNOON"]);
 export const attendanceSessionStatus = pgEnum("attendance_session_status", ["OPEN", "CLOSED"]);
 export const attendanceStatus = pgEnum("attendance_status", ["PRESENT", "ABSENT", "LATE", "EXCUSED"]);
 export const notificationEventType = pgEnum("notification_event_type", ["ATTENDANCE", "ACTIVITY"]);
@@ -147,14 +156,95 @@ export const schoolMemberships = pgTable("school_memberships", {
   index("school_memberships_user_status_idx").on(table.userId, table.status),
 ]);
 
+/**
+ * One school's timetable configuration.
+ *
+ * Shift, rotation anchor, and operating weekdays live on the school's single
+ * settings row rather than in a separate shift table. That follows from the
+ * periods: every period is "a period" now — there is no lesson-versus-break
+ * column — so a school has exactly one period list, and a single period list can
+ * belong to exactly one shift. A table of shifts would therefore have held either
+ * one row or a set of rows sharing one period list, which is a column pretending
+ * to be a relation.
+ *
+ * `shiftType` is the school's schedule shape: a fixed morning or afternoon shift,
+ * or the two alternating by week. Rotation is anchored to a stored date
+ * (`rotationBaseDate`) so "which shift is in session this week" is reproducible
+ * from the row instead of depending on when it was written. The week containing
+ * the base date is the morning week, and each following week alternates.
+ */
 export const schoolSettings = pgTable("school_settings", {
   schoolId: uuid("school_id").primaryKey().references(() => schools.id, { onDelete: "restrict" }),
   notifyOnPresent: boolean("notify_on_present").default(false).notNull(),
   notifyOnAbsent: boolean("notify_on_absent").default(false).notNull(),
   notifyOnLate: boolean("notify_on_late").default(false).notNull(),
   notifyOnExcused: boolean("notify_on_excused").default(false).notNull(),
+  // How long after a period ends its attendance may still be submitted. Zero
+  // means "until the period ends"; the value is a school-wide policy, not a
+  // per-shift one, because the deadline is a reporting rule rather than a
+  // property of the timetable.
+  attendanceSubmissionMinutes: integer("attendance_submission_minutes").default(0).notNull(),
+  shiftType: schoolShiftKind("shift_type").default("MORNING").notNull(),
+  // Required exactly when the shift is rotating: the schedule has nowhere to
+  // alternate from otherwise.
+  rotationBaseDate: date("rotation_base_date", { mode: "string" }),
   ...timestamps,
-});
+}, (table) => [
+  check("school_settings_attendance_submission_minutes_check", sql`${table.attendanceSubmissionMinutes} >= 0`),
+  check("school_settings_rotation_base_date_check", sql`(
+    (${table.shiftType} = 'ROTATING' and ${table.rotationBaseDate} is not null)
+    or (${table.shiftType} <> 'ROTATING' and ${table.rotationBaseDate} is null)
+  )`),
+]);
+
+/**
+ * One period in the school's day.
+ *
+ * Periods are a single ordered list for the whole school, so there is no kind and
+ * no label: a period is identified by its position and described by when it
+ * starts and ends. Breaks are not modelled at all — a gap between one period's
+ * end and the next one's start is simply a gap, which is why the table has no
+ * break row and no interval column.
+ *
+ * A period is naturally two hours, and it is the *assignments* inside it that
+ * decide what those hours are: a period whose two hour rows name the same teacher
+ * and subject is a two-hour lesson, and one whose rows differ is a period split
+ * between two lessons. Keeping that on the assignments rather than here is what
+ * lets one period hold either shape without the period having to be declared as
+ * one thing or the other.
+ */
+export const schoolPeriods = pgTable("school_periods", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  ordinal: integer("ordinal").notNull(),
+  startTime: time("start_time").notNull(),
+  endTime: time("end_time").notNull(),
+  ...timestamps,
+}, (table) => [
+  unique("school_periods_school_ordinal_unique").on(table.schoolId, table.ordinal),
+  unique("school_periods_school_id_id_unique").on(table.schoolId, table.id),
+  check("school_periods_time_order_check", sql`${table.startTime} < ${table.endTime}`),
+  check("school_periods_ordinal_check", sql`${table.ordinal} > 0`),
+  index("school_periods_school_ordinal_idx").on(table.schoolId, table.ordinal),
+]);
+
+/**
+ * The weekdays the school operates on.
+ *
+ * Stored as the presence of a row rather than as seven booleans or a bitmask:
+ * "which days is the school open" is a set, and a set with its own rows can be
+ * read, ordered, and constrained like every other relationship here. `dayOfWeek`
+ * follows the school's own week and is numbered 1 (Saturday) through 7 (Friday),
+ * which is why it is documented here instead of being left to the caller.
+ */
+export const schoolOperatingDays = pgTable("school_operating_days", {
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  dayOfWeek: integer("day_of_week").notNull(),
+  ...timestamps,
+}, (table) => [
+  primaryKey({ columns: [table.schoolId, table.dayOfWeek] }),
+  check("school_operating_days_day_of_week_check", sql`${table.dayOfWeek} between 1 and 7`),
+]);
 
 // A teacher's school-local employment record. The membership carries identity,
 // role, and access; this row carries the attributes that only mean something for
@@ -349,38 +439,113 @@ export const classrooms = pgTable("classrooms", {
   index("classrooms_school_year_grade_idx").on(table.schoolId, table.academicYearId, table.gradeId),
 ]);
 
-export const classTeachers = pgTable("class_teachers", {
+/**
+ * A teacher's mandatory weekly teaching hours for one academic year.
+ *
+ * Stored per year rather than on the teacher, because the obligation is agreed
+ * for a year and next year's contract is a different number; storing it on the
+ * profile would silently rewrite history every September. A teacher with no row
+ * has no stated obligation, which is different from an obligation of zero.
+ *
+ * The requirement is compared against the hours the teacher's timetable entries
+ * carry, so a one-hour slot that happens to be shared between two teachers still
+ * counts as one hour in each of their totals — the school bought one hour of
+ * teaching, and each teacher is accountable for having taken it.
+ */
+export const teacherWeeklyHourRequirements = pgTable("teacher_weekly_hour_requirements", {
   id: uuid("id").defaultRandom().primaryKey(),
   schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
-  classroomId: uuid("classroom_id").notNull(),
+  academicYearId: uuid("academic_year_id").notNull(),
   teacherMembershipId: uuid("teacher_membership_id").notNull(),
-  subjectId: uuid("subject_id"),
-  startDate: date("start_date", { mode: "string" }).notNull(),
-  endDate: date("end_date", { mode: "string" }),
-  status: recordStatus("status").default("ACTIVE").notNull(),
-  isPrimary: boolean("is_primary").default(false).notNull(),
+  requiredWeeklyHours: integer("required_weekly_hours").notNull(),
   ...timestamps,
 }, (table) => [
-  unique("class_teachers_assignment_unique").on(table.schoolId, table.classroomId, table.teacherMembershipId, table.subjectId),
+  unique("teacher_weekly_hour_requirements_membership_year_unique").on(table.schoolId, table.teacherMembershipId, table.academicYearId),
   foreignKey({
-    columns: [table.schoolId, table.classroomId],
-    foreignColumns: [classrooms.schoolId, classrooms.id],
-    name: "class_teachers_school_classroom_fk",
+    columns: [table.schoolId, table.academicYearId],
+    foreignColumns: [academicYears.schoolId, academicYears.id],
+    name: "teacher_weekly_hour_requirements_school_year_fk",
   }).onDelete("restrict"),
   foreignKey({
     columns: [table.schoolId, table.teacherMembershipId],
     foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
-    name: "class_teachers_school_membership_fk",
+    name: "teacher_weekly_hour_requirements_school_membership_fk",
+  }).onDelete("restrict"),
+  check("teacher_weekly_hour_requirements_hours_check", sql`${table.requiredWeeklyHours} >= 0`),
+  index("teacher_weekly_hour_requirements_school_year_idx").on(table.schoolId, table.academicYearId),
+]);
+
+/**
+ * One teaching hour of one period of one weekday: who teaches what, for a class.
+ *
+ * A period is naturally two hours, so a period holds two of these rows — hour 1
+ * and hour 2 — and each names its own subject and its own teacher. That is what
+ * makes the three shapes the school actually uses expressible without a mode
+ * column: two rows with the same teacher and subject are a full two-hour lesson
+ * (the interface draws them as one joined cell), one row alone is a single hour,
+ * and two rows with different teachers or subjects are a split period. The old
+ * model carried a nullable partner teacher and a rotation mode to say the same
+ * thing, which could only ever express two teachers sharing *one* subject on
+ * alternating weeks, and could not express a period whose two hours are two
+ * different lessons at all.
+ *
+ * Because a row is one hour, the hours a teacher is assigned is the count of
+ * their rows — there is no duration column to disagree with, and the assigned
+ * hours report is a count rather than a sum over a figure the caller supplied.
+ *
+ * The row is also what attendance keys on: a session is one hour of one period on
+ * one date, so its subject and its responsible teacher come from the row itself
+ * and are never ambiguous, even when the two hours of a period are different
+ * lessons.
+ */
+export const timetableEntries = pgTable("timetable_entries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  schoolId: uuid("school_id").notNull().references(() => schools.id, { onDelete: "restrict" }),
+  academicYearId: uuid("academic_year_id").notNull(),
+  classroomId: uuid("classroom_id").notNull(),
+  periodId: uuid("period_id").notNull(),
+  // 1 = Saturday through 7 = Friday, the school's own week.
+  dayOfWeek: integer("day_of_week").notNull(),
+  // Which hour of the period this is: 1 for the first, 2 for the second.
+  hourIndex: integer("hour_index").notNull(),
+  subjectId: uuid("subject_id").notNull(),
+  teacherMembershipId: uuid("teacher_membership_id").notNull(),
+  status: recordStatus("status").default("ACTIVE").notNull(),
+  ...timestamps,
+}, (table) => [
+  unique("timetable_entries_school_id_id_unique").on(table.schoolId, table.id),
+  // One assignment per hour of a slot, so a class can never be double-booked and
+  // a period can never hold three hours' worth of lessons.
+  unique("timetable_entries_classroom_hour_unique").on(table.schoolId, table.classroomId, table.dayOfWeek, table.periodId, table.hourIndex),
+  // Composite references are what make "the same school, the same year, the same
+  // period" structural rather than a convention code has to remember.
+  foreignKey({
+    columns: [table.schoolId, table.classroomId, table.academicYearId],
+    foreignColumns: [classrooms.schoolId, classrooms.id, classrooms.academicYearId],
+    name: "timetable_entries_school_classroom_year_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.schoolId, table.periodId],
+    foreignColumns: [schoolPeriods.schoolId, schoolPeriods.id],
+    name: "timetable_entries_school_period_fk",
   }).onDelete("restrict"),
   foreignKey({
     columns: [table.schoolId, table.subjectId],
     foreignColumns: [subjects.schoolId, subjects.id],
-    name: "class_teachers_school_subject_fk",
+    name: "timetable_entries_school_subject_fk",
   }).onDelete("restrict"),
-  check("class_teachers_date_order_check", sql`${table.endDate} is null or ${table.startDate} < ${table.endDate}`),
-  uniqueIndex("class_teachers_one_primary_idx").on(table.schoolId, table.classroomId).where(sql`is_primary = true and status = 'ACTIVE'`),
-  index("class_teachers_school_teacher_idx").on(table.schoolId, table.teacherMembershipId, table.status),
-  index("class_teachers_school_classroom_idx").on(table.schoolId, table.classroomId, table.status),
+  foreignKey({
+    columns: [table.schoolId, table.teacherMembershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "timetable_entries_school_teacher_fk",
+  }).onDelete("restrict"),
+  check("timetable_entries_day_of_week_check", sql`${table.dayOfWeek} between 1 and 7`),
+  // A period holds exactly two hours, so the hour index can only be 1 or 2.
+  check("timetable_entries_hour_index_check", sql`${table.hourIndex} between 1 and 2`),
+  // Teacher-side lookup: "which hours does this teacher hold?" is the query behind
+  // assigned-hours reporting, the clash check, and the teacher's own day view.
+  index("timetable_entries_school_teacher_idx").on(table.schoolId, table.teacherMembershipId, table.status),
+  index("timetable_entries_school_classroom_day_idx").on(table.schoolId, table.classroomId, table.dayOfWeek),
 ]);
 
 export const students = pgTable("students", {
@@ -479,18 +644,57 @@ export const attendanceSessions = pgTable("attendance_sessions", {
   classroomId: uuid("classroom_id").notNull(),
   academicYearId: uuid("academic_year_id").notNull(),
   businessDate: date("business_date", { mode: "string" }).notNull(),
-  sessionKind: attendanceSessionKind("session_kind").default("DAILY").notNull(),
+  // The timetable assignment the session belongs to. Attendance is per teaching
+  // hour, so the assignment — which names the period, the hour of it, and the
+  // weekday — is what identifies the session; the classroom and year are carried
+  // explicitly so the row stays a complete tenant-scoped record on its own.
+  timetableEntryId: uuid("timetable_entry_id").notNull(),
+  subjectId: uuid("subject_id").notNull(),
+  // Who is responsible for this occurrence, taken from the assignment at the moment
+  // the session is opened. Stored rather than re-derived so the record names the
+  // person who owes the submission even after the timetable is edited.
+  teacherMembershipId: uuid("teacher_membership_id").notNull(),
+  // Which shift the school was in on this date, resolved from the configuration
+  // when the session was opened. Stored rather than re-derived because a rotating
+  // school's answer depends on the rotation anchor, and a report about "the
+  // morning of 5 Azar" must keep meaning the shift that actually ran even if the
+  // anchor is later changed.
+  applicableShift: applicableShift("applicable_shift").notNull(),
   status: attendanceSessionStatus("status").default("OPEN").notNull(),
   createdByMembershipId: uuid("created_by_membership_id").notNull(),
+  // When this occurrence's attendance must be submitted by, computed from the
+  // school's submission window and the period's end time at session creation.
+  // Stored rather than derived because the deadline a teacher was working to must
+  // not move when the school later edits its timetable or its policy.
+  submissionDeadlineAt: timestamp("submission_deadline_at", { withTimezone: true, mode: "date" }).notNull(),
   closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
   ...timestamps,
 }, (table) => [
   unique("attendance_sessions_school_id_classroom_unique").on(table.schoolId, table.id, table.classroomId),
-  unique("attendance_sessions_school_classroom_date_kind_unique").on(table.schoolId, table.classroomId, table.businessDate, table.sessionKind),
+  unique("attendance_sessions_school_id_id_unique").on(table.schoolId, table.id),
+  // One session per classroom teaching hour. A period's two hours are two
+  // sessions, because each lesson is its own register with its own teacher and
+  // subject.
+  unique("attendance_sessions_school_entry_date_unique").on(table.schoolId, table.timetableEntryId, table.businessDate),
   foreignKey({
     columns: [table.schoolId, table.classroomId, table.academicYearId],
     foreignColumns: [classrooms.schoolId, classrooms.id, classrooms.academicYearId],
     name: "attendance_sessions_school_classroom_year_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.schoolId, table.timetableEntryId],
+    foreignColumns: [timetableEntries.schoolId, timetableEntries.id],
+    name: "attendance_sessions_school_timetable_entry_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.schoolId, table.subjectId],
+    foreignColumns: [subjects.schoolId, subjects.id],
+    name: "attendance_sessions_school_subject_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.schoolId, table.teacherMembershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "attendance_sessions_school_teacher_membership_fk",
   }).onDelete("restrict"),
   foreignKey({
     columns: [table.schoolId, table.createdByMembershipId],
@@ -498,6 +702,8 @@ export const attendanceSessions = pgTable("attendance_sessions", {
     name: "attendance_sessions_school_creator_membership_fk",
   }).onDelete("restrict"),
   index("attendance_sessions_school_classroom_date_idx").on(table.schoolId, table.classroomId, table.businessDate),
+  index("attendance_sessions_school_teacher_date_idx").on(table.schoolId, table.teacherMembershipId, table.businessDate),
+  index("attendance_sessions_school_status_deadline_idx").on(table.schoolId, table.status, table.submissionDeadlineAt),
 ]);
 
 export const attendanceRecords = pgTable("attendance_records", {

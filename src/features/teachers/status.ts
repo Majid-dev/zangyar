@@ -23,6 +23,14 @@
  *
  * Mobile verification is reported separately (`users.phoneNumberVerified`) rather
  * than folded in here, because surfaces show it as its own axis.
+ *
+ * Mandatory weekly hours are the third decision, and they are what separates the
+ * two states that both mean "may use the school". An `ACTIVE` membership with no
+ * recorded hours grants sign-in and nothing else: the teacher can reach their
+ * account and cannot be put on a timetable, so reporting them as plainly active
+ * overstates their position. `AWAITING_HOURS` names that state rather than
+ * introducing a fourth membership value, because it is a statement about the
+ * teacher's configuration, not about their access.
  */
 
 export type MembershipStatus = "ACTIVE" | "SUSPENDED" | "REVOKED" | "PENDING_ADMIN_APPROVAL" | "REJECTED";
@@ -30,6 +38,7 @@ export type RegistrationStatus = "PENDING" | "CLAIMED" | "REVOKED";
 export type TeacherDisplayStatus =
   | "PENDING_REGISTRATION"
   | "PENDING_ADMIN_APPROVAL"
+  | "AWAITING_HOURS"
   | "ACTIVE"
   | "REJECTED"
   | "DEACTIVATED";
@@ -41,6 +50,7 @@ export type TeacherTargetStatus = (typeof TEACHER_TARGET_STATUSES)[number];
 export const TEACHER_DISPLAY_STATUS_LABELS: Record<TeacherDisplayStatus, string> = {
   PENDING_REGISTRATION: "در انتظار ثبت‌نام",
   PENDING_ADMIN_APPROVAL: "در انتظار تأیید مدیر",
+  AWAITING_HOURS: "در انتظار تعیین ساعت موظفی",
   ACTIVE: "فعال",
   REJECTED: "رد‌شده",
   DEACTIVATED: "غیرفعال",
@@ -49,6 +59,7 @@ export const TEACHER_DISPLAY_STATUS_LABELS: Record<TeacherDisplayStatus, string>
 export const TEACHER_DISPLAY_STATUS_TONES: Record<TeacherDisplayStatus, "success" | "warning" | "danger" | "neutral" | "info"> = {
   PENDING_REGISTRATION: "neutral",
   PENDING_ADMIN_APPROVAL: "info",
+  AWAITING_HOURS: "warning",
   ACTIVE: "success",
   REJECTED: "danger",
   DEACTIVATED: "warning",
@@ -63,6 +74,12 @@ export const TEACHER_DISPLAY_STATUS_TONES: Record<TeacherDisplayStatus, "success
 export function deriveTeacherDisplayStatus(input: {
   registrationStatus: RegistrationStatus;
   membershipStatus: MembershipStatus | null;
+  /**
+   * Whether the teacher is active with no recorded obligation. Passed in rather
+   * than derived here because it depends on the school's academic years, which
+   * this module deliberately does not read.
+   */
+  hoursOutstanding?: boolean;
 }): TeacherDisplayStatus {
   if (!input.membershipStatus) {
     // No membership yet. A revoked authorization is reported as deactivated so the
@@ -72,7 +89,9 @@ export function deriveTeacherDisplayStatus(input: {
 
   switch (input.membershipStatus) {
     case "ACTIVE":
-      return "ACTIVE";
+      // Access first, then configuration: an active teacher with no recorded
+      // hours is awaiting a decision from the admin, not lacking access.
+      return input.hoursOutstanding ? "AWAITING_HOURS" : "ACTIVE";
     case "PENDING_ADMIN_APPROVAL":
       return "PENDING_ADMIN_APPROVAL";
     case "REJECTED":
@@ -158,6 +177,12 @@ export type TeacherStatusAction = {
   /** Question shown before an action whose effects the admin should weigh. */
   confirmation: string | null;
   tone: "primary" | "secondary" | "danger";
+  /**
+   * Whether pressing this action opens the mandatory-hours dialog rather than
+   * submitting. Granted server-side with the rest of the action, so the table and
+   * the detail page cannot present the same decision differently.
+   */
+  requiresWeeklyHours: boolean;
 };
 
 export function teacherStatusAction(membershipStatus: MembershipStatus | null): TeacherStatusAction | null {
@@ -171,6 +196,9 @@ export function teacherStatusAction(membershipStatus: MembershipStatus | null): 
         label: "تأیید دبیر",
         confirmation: null,
         tone: "primary",
+        // Approval also records the teacher's obligation, so the button opens the
+        // hours dialog instead of submitting straight away.
+        requiresWeeklyHours: true,
       };
     case "REJECTED":
       return {
@@ -179,6 +207,7 @@ export function teacherStatusAction(membershipStatus: MembershipStatus | null): 
         label: "تأیید و فعال‌سازی",
         confirmation: null,
         tone: "secondary",
+        requiresWeeklyHours: true,
       };
     case "ACTIVE":
       return {
@@ -187,15 +216,21 @@ export function teacherStatusAction(membershipStatus: MembershipStatus | null): 
         label: "غیرفعال‌سازی",
         confirmation: "دسترسی این دبیر قطع شود؟ تا فعال‌سازی دوباره، به منابع مدرسه دسترسی ندارد.",
         tone: "danger",
+        requiresWeeklyHours: false,
       };
     case "SUSPENDED":
     case "REVOKED":
+      // Reactivation does not ask for hours again: an obligation was recorded when
+      // the teacher was approved and is still on file, so re-entering it would
+      // invite an accidental change to a figure the admin did not come here to
+      // edit. The dialog is offered only when no figure exists yet.
       return {
         status: "ACTIVE",
         decision: "REACTIVATED",
         label: "فعال‌سازی",
         confirmation: null,
         tone: "secondary",
+        requiresWeeklyHours: false,
       };
     default:
       return null;
@@ -217,5 +252,6 @@ export function teacherRejectionAction(membershipStatus: MembershipStatus | null
     label: "رد ثبت‌نام",
     confirmation: "ثبت‌نام این دبیر رد شود؟ دسترسی او فعال نمی‌شود و می‌توانید بعداً تأییدش کنید.",
     tone: "danger",
+    requiresWeeklyHours: false,
   };
 }
