@@ -27,21 +27,35 @@ const shiftOptions: { value: ShiftType; label: string; description: string }[] =
  *
  * The base date is what makes "which shift is this week" reproducible. When it
  * rotates, the week containing the chosen date is a morning week and every
- * following week alternates.
+ * following week alternates. It defaults to the academic year's start date, because
+ * that is the anchor a school almost always means — the year opens in the shift the
+ * admin thinks of as the first one — and leaving it empty would make the school
+ * unsavable. The default is shown, not written: it is a real choice the admin can
+ * change before saving, and once saved the stored value is what is shown.
+ *
+ * The operating days are pre-checked to the ordinary Saturday-to-Wednesday week
+ * when the school has never saved any, so the first save is one action rather than
+ * seven; a school that has saved its own week sees exactly that week.
  */
 export function ShiftSettingsForm({
   shiftType,
   rotationBaseDate,
   operatingDays,
   weekdays,
+  academicYearStartDate,
 }: {
   shiftType: ShiftType;
   rotationBaseDate: string | null;
   operatingDays: number[];
   weekdays: { value: string; label: string }[];
+  /** The active academic year's first day, used as the rotation anchor default. */
+  academicYearStartDate: string | null;
 }) {
   const [kind, setKind] = useState<ShiftType>(shiftType);
   const rotating = kind === "ROTATING";
+  // A stored base date wins; otherwise the year's own first day is offered. Null
+  // only when the school has neither, which a rotating school cannot save past.
+  const effectiveRotationBaseDate = rotationBaseDate ?? academicYearStartDate;
 
   return (
     <Panel>
@@ -85,8 +99,15 @@ export function ShiftSettingsForm({
             hint={rotating ? "هفته‌ی این تاریخ نوبت صبح است؛ هفته‌های بعد یکی‌درمیان جابه‌جا می‌شود." : "فقط برای شیفت چرخشی فعال است."}
           >
             {/* Rendered but inert when the shift is fixed: a disabled input would not
-                submit, and the server needs to see no date to accept the change. */}
-            <JalaliDatePicker name="rotationBaseDate" defaultValue={rotating ? rotationBaseDate : null} disabled={!rotating} />
+                submit, and the server needs to see no date to accept the change. The
+                picker is keyed on the effective value so switching the shift to
+                rotating re-mounts it with the year's start date prefilled. */}
+            <JalaliDatePicker
+              key={rotating ? `rotating-${effectiveRotationBaseDate ?? "none"}` : "fixed"}
+              name="rotationBaseDate"
+              defaultValue={rotating ? effectiveRotationBaseDate : null}
+              disabled={!rotating}
+            />
           </Field>
         </div>
 

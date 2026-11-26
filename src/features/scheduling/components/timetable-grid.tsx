@@ -39,7 +39,7 @@ export type TimetableGridData = {
   classroomName: string;
   academicYearId: string;
   operatingDays: number[];
-  periods: { id: string; ordinal: number; startTime: string; endTime: string }[];
+  periods: { id: string; ordinal: number; startTime: string; endTime: string; afternoonStartTime: string | null; afternoonEndTime: string | null }[];
   subjects: { id: string; name: string }[];
   teachers: GridTeacher[];
   /** Keyed by `day:periodId:hourIndex`. */
@@ -237,6 +237,14 @@ export function TimetableGrid({ data }: { data: TimetableGridData }) {
                   <th key={period.id} scope="col" colSpan={2} className="border-s border-border p-3 text-center">
                     <span className="block text-primary">زنگ {toPersianDigits(period.ordinal)}</span>
                     <span className="mt-1 block font-normal tabular-nums" dir="ltr">{clock(period.startTime)} – {clock(period.endTime)}</span>
+                    {/* A rotating school's period runs at different times in the
+                        afternoon, so the header states both rather than showing the
+                        morning's as though it were the only one. */}
+                    {period.afternoonStartTime && period.afternoonEndTime ? (
+                      <span className="mt-0.5 block text-[0.65rem] font-normal tabular-nums text-muted" dir="ltr">
+                        {clock(period.afternoonStartTime)} – {clock(period.afternoonEndTime)}
+                      </span>
+                    ) : null}
                   </th>
                 ))}
               </tr>

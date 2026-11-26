@@ -47,7 +47,7 @@ erDiagram
     ACADEMIC_YEARS ||--o{ ENROLLMENTS : governs
 
     CLASSROOMS ||--o{ ATTENDANCE_SESSIONS : has
-    TIMETABLE_ENTRIES ||--o{ ATTENDANCE_SESSIONS : occurs_as
+    SCHOOL_PERIODS ||--o{ ATTENDANCE_SESSIONS : occurs_as
     ATTENDANCE_SESSIONS ||--o{ ATTENDANCE_RECORDS : contains
     ENROLLMENTS ||--o{ ATTENDANCE_RECORDS : receives
     CLASSROOMS ||--o{ CLASS_ACTIVITIES : hosts
@@ -84,7 +84,7 @@ erDiagram
 | `classrooms` | School and academic year | A classroom belongs to one academic year and grade; historical classrooms remain available for reporting. |
 | `subjects` | School | School-local catalog; archive when no longer offered. |
 | `school_settings` shift | School | The school's own timetable shape lives on its settings row: `shiftType` (morning, afternoon, or rotating weekly) and, for a rotating school, `rotationBaseDate`. One row per school, because a school has one period list and a period list belongs to one shift. |
-| `school_periods` | School | One position in the school day: an `ordinal`, a `startTime`, and an `endTime`. No kind and no label — a period is identified by its place and described by its times, and breaks are not modelled at all. A period is naturally two hours. |
+| `school_periods` | School | One position in the school day: an `ordinal`, an opening `startTime`/`endTime`, and — for a rotating school — an `afternoonStartTime`/`afternoonEndTime`. No kind and no label: a period is identified by its place and described by its times, and breaks are not modelled at all. A period is naturally two hours. |
 | `school_operating_days` | School | The weekdays the school runs on, one row per day, numbered 1 (Saturday) through 7 (Friday). Presence of the row is the fact. |
 | `timetable_entries` | School, academic year, and classroom | One teaching hour: classroom, weekday, period, which hour of that period, subject, and the one teacher who holds it. Two entries per period are its two hours, so a period is a full lesson when both name the same teacher and subject and a split one when they differ. Unique per classroom hour, so a class cannot be double-booked. Archived rather than deleted once attendance references it. |
 | `teacher_weekly_hour_requirements` | School and academic year | One mandatory weekly hour figure per teacher per academic year. This is the scheduling gate: a teacher with no row, or a row of zero, cannot be given timetable slots. Approval records the figure, and it can be corrected from the teacher's page. |
@@ -102,7 +102,7 @@ erDiagram
 
 | Entity | Ownership | Cardinality and lifecycle |
 |---|---|---|
-| `attendance_sessions` | School, classroom, and timetable hour | One session per timetable entry per business date, so a class has one session per teaching hour it meets. Names the responsible teacher and subject directly, and stores the submission deadline it was created under. |
+| `attendance_sessions` | School, classroom, and period | One session per classroom period per business date, so a class has one register for each period it meets. Names the responsible teacher directly — for a split period, the teacher the week's rotation gives it to — and stores the submission deadline it was created under. |
 | `attendance_records` | School and session/enrollment | One status per enrollment in a session; corrections update the record and create audit history. |
 | `class_activities` | School and classroom | Classroom event with date/category/description; may be archived. |
 | `activity_records` | School and activity/enrollment | One student outcome per activity/enrollment. |
@@ -169,7 +169,9 @@ A classroom references an academic year and grade from the same school through c
 
 The school's shift is two columns on its settings row rather than a table. `shiftType` is `MORNING`, `AFTERNOON`, or `ROTATING`, and `rotationBaseDate` is set exactly when the shift rotates — enforced by a check — because a fixed shift has no rotation to anchor. The week containing the base date is a morning week and each following week alternates, so which shift is in session on a date is reproducible from the row rather than from when it was configured. A school has one period list and a period list belongs to one shift, so a table of shifts would have held either a single row or a set of rows sharing one period list; putting the two columns here instead is what keeps the model honest.
 
-`school_periods` carries `schoolId`, `ordinal`, `startTime`, and `endTime`. Unique `(schoolId, ordinal)`, checked `startTime < endTime` and `ordinal > 0`. There is deliberately no kind, no label, and no hour count: a period is a position in the day described by when it starts and ends, and the gap between one period's end and the next one's start *is* the break, so nothing has to be configured to express it. A period is naturally two hours; how many of them an assignment consumes is the assignment's business, not the period's.
+`school_periods` carries `schoolId`, `ordinal`, `startTime`, `endTime`, and the nullable `afternoonStartTime`/`afternoonEndTime`. Unique `(schoolId, ordinal)`, checked `startTime < endTime`, `ordinal > 0`, and — for the afternoon pair — both-set-or-both-null with start before end. There is deliberately no kind, no label, and no hour count: a period is a position in the day described by when it starts and ends, and the gap between one period's end and the next one's start *is* the break, so nothing has to be configured to express it. A period is naturally two hours; how many of them an assignment consumes is the assignment's business, not the period's.
+
+The two time pairs exist because a rotating school runs a different daily schedule in each shift: the opening shift lives in `startTime`/`endTime`, which is all a fixed school has and what every row is guaranteed to carry, and the afternoon shift in the optional pair. Which pair applies on a date is resolved from the shift that date falls in (`resolveApplicableShift` → `resolvePeriodTimes`), never stored; a rotating school that has not entered an afternoon schedule falls back to the opening times rather than to a schedule nobody wrote. Overlap is checked per shift, since the two are separate schedules that may legitimately share clock times.
 
 `school_operating_days` carries `schoolId` and `dayOfWeek`, primary keyed on both, with 1 = Saturday through 7 = Friday enforced by a check. Storing the set as rows rather than as seven booleans keeps it queryable and orderable like every other relationship here.
 
@@ -205,9 +207,9 @@ References school, student, academic year, and classroom and includes `startDate
 
 ### `attendance_sessions`
 
-References school, classroom, academic year, timetable entry, subject, business date, responsible teacher membership, creator membership, and status, plus `submissionDeadlineAt`. Unique `(schoolId, timetableEntryId, businessDate)`: attendance is recorded per teaching hour, so a class has one session for each hour it meets rather than one per day, and the two hours of a period are two sessions because they may be two different lessons.
+References school, classroom, academic year, period, business date, responsible teacher membership, creator membership, and status, plus `submissionDeadlineAt`. Unique `(schoolId, classroomId, periodId, businessDate)`: attendance is recorded per period, so a class registers a period once a day. A period whose two hours belong to two teachers is one session rather than two, because its responsibility alternates weekly and the week names one owner for the whole period.
 
-The session carries `subjectId` and `teacherMembershipId` explicitly rather than leaving them to be derived from the timetable, because the assignment a session belongs to can be re-pointed at a different teacher or lesson, and the record of who owed the submission must not move when the timetable is later edited. It retains its academic year even if the classroom configuration changes.
+The session carries `teacherMembershipId` explicitly rather than leaving it to be derived from the timetable, because which teacher owes a split period depends on the week and the assignment can be re-pointed at a different teacher, so the record of who owed the submission must not move when the timetable is later edited. The subject is deliberately absent: a split period holds two, and the timetable already describes which hour is which. It retains its academic year even if the classroom configuration changes.
 
 `submissionDeadlineAt` is computed at session creation from the school's `attendanceSubmissionMinutes` window and the period's end time, resolved in the school's timezone, and stored rather than derived: the deadline a teacher was working to must not shift when the school later edits its timetable or its policy. A School Admin is exempt from the deadline — correction is their job — but not from the shift and weekday rules, since a period that never happened has nothing to correct.
 
@@ -319,8 +321,9 @@ audit_logs(actor_user_id, occurred_at)
 - National ID is optional and, when present, is unique within the school.
 - User-facing Persian-calendar dates are converted to Gregorian dates before storage.
 - Subject teachers belong to the weekly timetable, not to a classroom-level assignment record; a classroom names no teacher of its own.
-- A period is naturally two hours and carries no kind, label, or duration of its own; breaks are gaps between periods rather than configured rows.
+- A period is naturally two hours and carries no kind, label, or duration of its own; breaks are gaps between periods rather than configured rows. It carries both shifts' times when the school rotates, and the shift a date falls in decides which pair applies.
 - An assignment is one teaching hour: a period holds two of them, so a period taught whole is two rows naming the same teacher and subject and a period split between two lessons is two rows that differ.
+- Attendance is per period, not per hour: a split period is one register whose responsible teacher alternates weekly between the two teachers who hold its hours. The rotation is derived from the academic year's start date, not stored, and it does not change any teacher's assigned hours.
 - A rotating school's shift alternates weekly from a stored base date, and the shift that actually ran is recorded on each attendance session.
 - A school's week runs Saturday (1) through Friday (7).
 - Operational records use archive/status transitions instead of destructive deletion in the MVP.

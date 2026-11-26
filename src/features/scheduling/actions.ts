@@ -62,6 +62,10 @@ export async function upsertPeriodAction(_previous: unknown, formData: FormData)
         periodId: nullableString(formData.get("periodId")),
         startTime: formData.get("startTime"),
         endTime: formData.get("endTime"),
+        // A fixed school's form does not render the afternoon fields, so an absent
+        // value is a genuine "no afternoon schedule" rather than an omission.
+        afternoonStartTime: nullableString(formData.get("afternoonStartTime")),
+        afternoonEndTime: nullableString(formData.get("afternoonEndTime")),
       }),
     });
     revalidateScheduling();

@@ -29,6 +29,17 @@ export const SCHOOL_WEEKDAY_LABELS: Record<number, string> = {
   7: "جمعه",
 };
 
+/**
+ * The weekdays a school is assumed open on before it says otherwise.
+ *
+ * Saturday through Wednesday, which is the ordinary Iranian school week: Thursday
+ * and Friday are the weekend and are left unchecked. This is a starting point for a
+ * school that has never saved its operating days, not a value written on its
+ * behalf — the form shows it pre-checked so saving is one action rather than seven,
+ * and a school that has saved its own week keeps exactly what it saved.
+ */
+export const DEFAULT_OPERATING_DAYS: readonly number[] = [1, 2, 3, 4, 5];
+
 export const SCHOOL_SHIFT_LABELS: Record<SchoolShiftType, string> = {
   MORNING: "صبح",
   AFTERNOON: "بعدازظهر",
@@ -94,7 +105,6 @@ export type SchoolShiftConfiguration = {
   shiftType: SchoolShiftType;
   rotationBaseDate: string | null;
 };
-
 /**
  * Which shift the school is in on a date.
  *
@@ -115,6 +125,104 @@ export function resolveApplicableShift(businessDate: string, configuration: Scho
 /** Whether the school operates on the weekday this date falls on. */
 export function isSchoolOperatingDay(businessDate: string, operatingDays: readonly number[]): boolean {
   return operatingDays.includes(schoolDayOfWeek(businessDate));
+}
+
+/** A period's clock times within one shift. */
+export type PeriodTimes = { startTime: string; endTime: string };
+
+/**
+ * A period as stored: the opening shift's times, plus the afternoon's when set.
+ *
+ * The opening pair is required because it is what a fixed school has and what every
+ * row is guaranteed to carry; the afternoon pair is optional because only a
+ * rotating school states it, and a rotating school that has not yet entered one
+ * falls back to the opening times rather than to a schedule nobody wrote.
+ */
+export type ShiftAwarePeriodTimes = {
+  startTime: string;
+  endTime: string;
+  afternoonStartTime: string | null;
+  afternoonEndTime: string | null;
+};
+
+/**
+ * The times a period runs at, in the shift the school is in on a date.
+ *
+ * This is what makes a rotating school's two shifts genuinely different schedules:
+ * the period a class meets in is the same period either way, but the clock times it
+ * runs at are the ones belonging to the shift that date falls in. For a fixed
+ * school, and for a rotating school's afternoon weeks before an afternoon schedule
+ * has been entered, the opening pair is the answer — the same fallback the shift
+ * resolver itself uses, so a school with a configured morning week is never left
+ * with an undefined schedule.
+ *
+ * Pure, so the entry form, the timetable grid, the attendance deadline, and any
+ * report all derive a period's times the same way from the same inputs.
+ */
+export function resolvePeriodTimes(period: ShiftAwarePeriodTimes, applicableShift: ApplicableShift): PeriodTimes {
+  if (applicableShift === "AFTERNOON" && period.afternoonStartTime && period.afternoonEndTime) {
+    return { startTime: period.afternoonStartTime, endTime: period.afternoonEndTime };
+  }
+  return { startTime: period.startTime, endTime: period.endTime };
+}
+
+/**
+ * Week one of an academic year, and every following week, as an index.
+ *
+ * The rotation is counted from the academic year's own `startDate`, not from a
+ * calendar week number and not from the shift's anchor. A school year begins in
+ * the middle of a calendar year, so any week numbering that resets in January
+ * would flip the parity mid-year and hand a period to the wrong teacher; counting
+ * whole weeks forward from the year's first day has no such reset, and passes
+ * through leap years, month boundaries, and holidays without a special case —
+ * because none of those change how many weeks have elapsed since the start.
+ *
+ * The anchor is snapped to its school week first, so a year that opens mid-week
+ * still rotates on week boundaries: the whole opening week is week zero, and the
+ * changeover happens on the Saturday.
+ */
+export function academicWeekIndex(academicYearStartDate: string, businessDate: string): number {
+  return weeksBetween(schoolWeekStart(academicYearStartDate), schoolWeekStart(businessDate));
+}
+
+/** How a period's responsibility alternates, and which teacher holds the base week. */
+export type AttendanceRotation = { baseTeacherMembershipId: string; partnerTeacherMembershipId: string };
+
+/**
+ * Which of a split period's two teachers owes the register in a given week.
+ *
+ * The teacher who teaches the period's *first* hour holds the week the academic
+ * year opens, and the two alternate from there, exactly as the school shifts do.
+ * Every week resolves to one of them for the period as a whole, which is what
+ * makes "one teacher records the entire period" true even though its two hours
+ * are two different lessons: the responsibility is a property of the week, not of
+ * whichever hour is being looked at.
+ *
+ * Returns null when the period is not split, so a caller can ask "who is
+ * responsible" of any period and get the teacher it names rather than having to
+ * branch on whether the period rotates.
+ */
+export function resolveAttendanceRotationTeacher(
+  rotation: AttendanceRotation | null,
+  academicYearStartDate: string,
+  businessDate: string,
+): string | null {
+  if (!rotation) return null;
+  // Parity is taken from the absolute distance so a date before the year's first
+  // day alternates in step rather than inverting the pattern.
+  const isBaseWeek = Math.abs(academicWeekIndex(academicYearStartDate, businessDate)) % 2 === 0;
+  return isBaseWeek ? rotation.baseTeacherMembershipId : rotation.partnerTeacherMembershipId;
+}
+
+/**
+ * How many 1-based weeks after the academic year's opening week a date falls in.
+ *
+ * Exposed so the interface can say which rotation week a date is in, rather than
+ * only who it hands the period to: "week three of the year" is what explains the
+ * answer to an admin seeing a teacher they did not expect.
+ */
+export function academicWeekNumber(academicYearStartDate: string, businessDate: string): number {
+  return academicWeekIndex(academicYearStartDate, businessDate) + 1;
 }
 
 export type TeacherHourSummary = {

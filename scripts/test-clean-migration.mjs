@@ -153,14 +153,25 @@ try {
       throw new Error(`Clean migration left school_periods.${removed} behind.`);
     }
   }
+  // A period carries both shifts' times, so a rotating school can run a different
+  // schedule in the afternoon; the opening pair stays required.
+  for (const required of ["start_time", "end_time", "afternoon_start_time", "afternoon_end_time"]) {
+    if (!periodColumns.has(required)) {
+      throw new Error(`Clean migration omitted school_periods column: ${required}`);
+    }
+  }
   const phaseSixColumnNames = new Set(columnsByTable.get("attendance_sessions") ?? []);
-  for (const required of ["timetable_entry_id", "subject_id", "teacher_membership_id", "submission_deadline_at", "applicable_shift"]) {
+  for (const required of ["period_id", "teacher_membership_id", "submission_deadline_at", "applicable_shift"]) {
     if (!phaseSixColumnNames.has(required)) {
       throw new Error(`Clean migration omitted attendance_sessions column: ${required}`);
     }
   }
-  if (phaseSixColumnNames.has("session_kind")) {
-    throw new Error("Clean migration left attendance_sessions.session_kind behind.");
+  // The session is keyed on the period, not on one of its hours: the hour-level
+  // columns and the session-kind enum are all shapes this migration replaced.
+  for (const removed of ["session_kind", "timetable_entry_id", "subject_id"]) {
+    if (phaseSixColumnNames.has(removed)) {
+      throw new Error(`Clean migration left attendance_sessions.${removed} behind.`);
+    }
   }
   const membershipValues = new Set(enumValues.rows.map((row) => row.value));
   for (const required of ["ACTIVE", "SUSPENDED", "REVOKED", "PENDING_ADMIN_APPROVAL", "REJECTED"]) {
