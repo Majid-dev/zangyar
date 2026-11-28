@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 
 import { writeAuditEvent } from "@/lib/audit";
 import { requireSchoolRole } from "@/lib/auth/authorization";
@@ -24,6 +24,7 @@ import {
   createGradeSchema,
   createSubjectSchema,
   transitionAcademicYearSchema,
+  updateClassroomSchema,
   updateSchoolConfigurationSchema,
   updateSchoolStatusSchema,
   type ArchiveCatalogItemInput,
@@ -32,6 +33,7 @@ import {
   type CreateGradeInput,
   type CreateSubjectInput,
   type TransitionAcademicYearInput,
+  type UpdateClassroomInput,
   type UpdateSchoolConfigurationInput,
   type UpdateSchoolStatusInput,
 } from "./schema";
@@ -290,6 +292,105 @@ export async function createClassroom(options: { headers: Headers; input: Create
       schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId,
       action: "CLASSROOM_CREATED", entityType: "CLASSROOM", entityId: classroom.id,
       metadata: { academicYearId: classroom.academicYearId, gradeId: classroom.gradeId },
+    });
+    return classroom;
+  });
+}
+
+/**
+ * Change a class in place.
+ *
+ * The grade is re-checked against this school's own grades rather than trusted from
+ * the form: a grade id is a bare uuid, and the check is what makes "the grade of this
+ * class" a tenant-scoped fact instead of whatever the request carried. The academic
+ * year is not editable — see `updateClassroomSchema` — so a class cannot be moved out
+ * from under the enrollments and timetable rows that are keyed to it.
+ *
+ * The row is read first rather than updated with `returning()` alone, so a class that
+ * has been archived between the page's read and this write is refused with a sentence
+ * instead of being quietly edited back into the list.
+ */
+export async function updateClassroom(options: { headers: Headers; input: UpdateClassroomInput }) {
+  const context = await requireOperationalAdmin(options.headers);
+  const input = updateClassroomSchema.parse(options.input);
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(classrooms).where(and(
+      eq(classrooms.id, input.classroomId), eq(classrooms.schoolId, context.schoolId), eq(classrooms.status, "ACTIVE"),
+    )).limit(1);
+    if (!existing) throw new Error("Classroom not found.");
+
+    const [grade] = await tx.select().from(grades).where(and(
+      eq(grades.id, input.gradeId), eq(grades.schoolId, context.schoolId),
+    )).limit(1);
+    if (!grade || grade.status === "ARCHIVED") throw new Error("Grade is not available for classrooms.");
+
+    const [classroom] = await tx.update(classrooms).set({
+      gradeId: input.gradeId,
+      code: input.code,
+      name: input.name,
+      capacity: input.capacity ?? null,
+      updatedAt: new Date(),
+    }).where(and(eq(classrooms.id, existing.id), eq(classrooms.schoolId, context.schoolId))).returning();
+
+    await writeAuditEvent(tx, {
+      schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId,
+      action: "CLASSROOM_UPDATED", entityType: "CLASSROOM", entityId: classroom.id,
+      // The previous values are recorded beside the new ones, because the audit log is
+      // the only place a school can see what a room used to be called after it has
+      // been renamed — the row itself carries only the present.
+      metadata: {
+        before: { code: existing.code, name: existing.name, gradeId: existing.gradeId, capacity: existing.capacity },
+        after: { code: classroom.code, name: classroom.name, gradeId: classroom.gradeId, capacity: classroom.capacity },
+      },
+    });
+    return classroom;
+  });
+}
+
+/**
+ * Retire a class.
+ *
+ * This archives rather than deletes, and the distinction is the whole design. A class
+ * is referenced with `on delete restrict` by the enrollments that placed students in
+ * it, the timetable rows that scheduled its lessons, and the attendance sessions
+ * recorded against those lessons; a real `DELETE` would either fail or, with cascades,
+ * destroy a school's attendance history to remove one row from a list. Archiving takes
+ * the class out of every operational read — the list, the timetable picker, attendance
+ * — while the records that reference it stay intact, so a report about last term still
+ * resolves the room it happened in.
+ *
+ * Refusing when students are still enrolled is deliberate: "delete this class" from a
+ * list is not a request to unenroll anyone, and a class whose students vanished from
+ * under them is worse than a refusal that says so.
+ */
+export async function archiveClassroom(options: { headers: Headers; input: ArchiveCatalogItemInput }) {
+  const context = await requireOperationalAdmin(options.headers);
+  const input = archiveCatalogItemSchema.parse(options.input);
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select().from(classrooms).where(and(
+      eq(classrooms.id, input.itemId), eq(classrooms.schoolId, context.schoolId),
+    )).limit(1);
+    if (!existing) throw new Error("Classroom not found.");
+    if (existing.status === "ARCHIVED") return existing;
+
+    const [enrolled] = await tx.select({ count: count(enrollments.id) }).from(enrollments).where(and(
+      eq(enrollments.schoolId, context.schoolId),
+      eq(enrollments.classroomId, existing.id),
+      eq(enrollments.status, "ACTIVE"),
+    ));
+    if (Number(enrolled?.count ?? 0) > 0) throw new Error("Classroom still has enrolled students.");
+
+    const [classroom] = await tx.update(classrooms).set({ status: "ARCHIVED", updatedAt: new Date() })
+      .where(and(eq(classrooms.id, existing.id), eq(classrooms.schoolId, context.schoolId))).returning();
+
+    await writeAuditEvent(tx, {
+      schoolId: context.schoolId, actorUserId: context.userId, actorMembershipId: context.membershipId,
+      action: "CLASSROOM_ARCHIVED", entityType: "CLASSROOM", entityId: classroom.id,
+      metadata: { code: classroom.code, name: classroom.name },
     });
     return classroom;
   });

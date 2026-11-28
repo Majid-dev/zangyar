@@ -7,8 +7,8 @@ import { and, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { academicYears, auditLogs, classrooms, enrollments, grades, schoolMemberships, schools, students } from "@/lib/db/schema";
-import { createAcademicYear, createClassroom, createGrade, createSubject, transitionAcademicYear, updateSchoolConfiguration } from "./services";
-import { listClassroomsForContext } from "./queries";
+import { archiveClassroom, createAcademicYear, createClassroom, createGrade, createSubject, transitionAcademicYear, updateClassroom, updateSchoolConfiguration } from "./services";
+import { listClassroomsForContext, listClassroomsWithTeachersForContext } from "./queries";
 import { createEnrollment } from "@/features/students/services";
 
 config({ path: ".env.local" });
@@ -226,6 +226,139 @@ describe.skipIf(!canRun)("persisted Phase 4 school and academic management", () 
 
   it("rejects teacher access to admin-only academic operations", async () => {
     await expect(createGrade({ headers: teacher.headers, input: { code: "NO", name: "No access", sortOrder: 0 } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  /**
+   * A context for the classroom reads, rebuilt per test since the membership is what
+   * carries the tenant and the role.
+   */
+  // Codes unique to this run's classroom tests. The suite builds one school, so two
+  // tests choosing the same year or grade code collide on the school-scoped unique
+  // index — the suffix is what keeps these independent of every other test's choices.
+  const uniq = crypto.randomUUID().slice(0, 6);
+
+  async function adminContext() {
+    const db = getDb();
+    const [school] = await db.select().from(schools).where(eq(schools.id, schoolA));
+    const membership = (await db.select().from(schoolMemberships).where(and(eq(schoolMemberships.schoolId, schoolA), eq(schoolMemberships.userId, admin.id))))[0];
+    return { membershipId: membership.id, schoolId: schoolA, userId: admin.id, role: "SCHOOL_ADMIN" as const, school };
+  }
+
+  it("edits a class in place and records what it was", async () => {
+    const db = getDb();
+    const yearOpen = await createAcademicYear({ headers: admin.headers, input: { code: `EY-${uniq}`, name: "سال ویرایش", startDate: "2030-09-23", endDate: "2031-06-20" } });
+    await activateYear(yearOpen.id);
+    const gradeOne = (await createGrade({ headers: admin.headers, input: { code: `G1-${uniq}`, name: "پایه ویرایش یک", sortOrder: 1 } })).id;
+    const gradeTwo = (await createGrade({ headers: admin.headers, input: { code: `G2-${uniq}`, name: "پایه ویرایش دو", sortOrder: 2 } })).id;
+    const room = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearOpen.id, gradeId: gradeOne, code: `EA-${uniq}`, name: "کلاس ویرایش", capacity: 20 } })).id;
+
+    const updated = await updateClassroom({ headers: admin.headers, input: {
+      classroomId: room, gradeId: gradeTwo, code: `EB-${uniq}`, name: "کلاس ویرایش‌شده", capacity: 25,
+    } });
+    expect(updated).toMatchObject({ id: room, code: `EB-${uniq}`, name: "کلاس ویرایش‌شده", capacity: 25, gradeId: gradeTwo });
+    // The academic year is not editable, so the update left it where it was.
+    expect(updated.academicYearId).toBe(yearOpen.id);
+
+    // The rename is audited with both the old and the new values, which is the only
+    // place the previous name survives.
+    const [event] = await db.select().from(auditLogs).where(and(
+      eq(auditLogs.schoolId, schoolA), eq(auditLogs.entityId, room), eq(auditLogs.action, "CLASSROOM_UPDATED"),
+    ));
+    expect(event).toBeDefined();
+    expect(event.metadata).toMatchObject({
+      before: { code: `EA-${uniq}`, name: "کلاس ویرایش", gradeId: gradeOne, capacity: 20 },
+      after: { code: `EB-${uniq}`, name: "کلاس ویرایش‌شده", gradeId: gradeTwo, capacity: 25 },
+    });
+  });
+
+  it("refuses to move a class onto another school's grade", async () => {
+    const db = getDb();
+    const [room] = await db.select().from(classrooms).where(and(eq(classrooms.schoolId, schoolA), eq(classrooms.code, `EB-${uniq}`)));
+    // gradeB belongs to school B: the id is a bare uuid, so the service's own check is
+    // what makes "this class's grade" a tenant-scoped fact.
+    await expect(updateClassroom({ headers: admin.headers, input: {
+      classroomId: room.id, gradeId: gradeB, code: room.code, name: room.name, capacity: null,
+    } })).rejects.toThrow("Grade is not available for classrooms.");
+    const [after] = await db.select().from(classrooms).where(eq(classrooms.id, room.id));
+    expect(after.gradeId).not.toBe(gradeB);
+  });
+
+  it("archives a class rather than deleting it, and keeps its records", async () => {
+    const db = getDb();
+    const context = await adminContext();
+    const [room] = await db.select().from(classrooms).where(and(eq(classrooms.schoolId, schoolA), eq(classrooms.code, `EB-${uniq}`)));
+
+    await archiveClassroom({ headers: admin.headers, input: { itemId: room.id } });
+    const [archived] = await db.select().from(classrooms).where(eq(classrooms.id, room.id));
+    expect(archived.status).toBe("ARCHIVED");
+    // The row is still there: archiving takes the class out of the lists, not out of
+    // the database, so enrollments and timetable rows that reference it still resolve.
+    expect(archived.name).toBe(room.name);
+    expect((await db.select().from(auditLogs).where(and(
+      eq(auditLogs.schoolId, schoolA), eq(auditLogs.entityId, room.id), eq(auditLogs.action, "CLASSROOM_ARCHIVED"),
+    ))).length).toBe(1);
+
+    // Archiving twice is the same as archiving once, not an error.
+    await archiveClassroom({ headers: admin.headers, input: { itemId: room.id } });
+    expect((await db.select().from(auditLogs).where(and(
+      eq(auditLogs.schoolId, schoolA), eq(auditLogs.entityId, room.id), eq(auditLogs.action, "CLASSROOM_ARCHIVED"),
+    ))).length).toBe(1);
+
+    // And it is gone from the operational list the page reads.
+    const listed = await listClassroomsWithTeachersForContext(context);
+    expect(listed.some((row) => row.classroom.id === room.id)).toBe(false);
+  });
+
+  it("refuses to archive a class that still has students enrolled", async () => {
+    const db = getDb();
+    const context = await adminContext();
+    const [yearOpen] = await db.select().from(academicYears).where(and(eq(academicYears.schoolId, schoolA), eq(academicYears.code, `EY-${uniq}`)));
+    const [grade] = await db.select().from(grades).where(and(eq(grades.schoolId, schoolA), eq(grades.code, `G2-${uniq}`)));
+    const room = (await createClassroom({ headers: admin.headers, input: { academicYearId: yearOpen.id, gradeId: grade.id, code: `EC-${uniq}`, name: "کلاس دارای دانش‌آموز" } })).id;
+    const student = (await db.insert(students).values({ schoolId: schoolA, admissionNumber: `E-${crypto.randomUUID().slice(0, 8)}`, firstName: "زهرا", lastName: "ویرایش" }).returning())[0];
+    await createEnrollment({ headers: admin.headers, input: { studentId: student.id, academicYearId: yearOpen.id, classroomId: room, startDate: "2030-09-23", endDate: null } });
+
+    await expect(archiveClassroom({ headers: admin.headers, input: { itemId: room } }))
+      .rejects.toThrow("Classroom still has enrolled students.");
+    const [still] = await db.select().from(classrooms).where(eq(classrooms.id, room));
+    expect(still.status).toBe("ACTIVE");
+
+    // The count the confirmation dialog states comes from the same list read.
+    const listed = await listClassroomsWithTeachersForContext(context);
+    expect(listed.find((row) => row.classroom.id === room)?.enrolledCount).toBe(1);
+  });
+
+  it("searches classes by name, code, and grade", async () => {
+    const context = await adminContext();
+    const all = await listClassroomsWithTeachersForContext(context);
+    expect(all.length).toBeGreaterThan(0);
+
+    // By name.
+    const byName = await listClassroomsWithTeachersForContext(context, { search: "کلاس دارای" });
+    expect(byName.length).toBeGreaterThan(0);
+    expect(byName.every((row) => row.classroom.name.includes("کلاس دارای"))).toBe(true);
+
+    // By code, which is stored in Latin letters and typed the same way.
+    const byCode = await listClassroomsWithTeachersForContext(context, { search: `EC-${uniq}` });
+    expect(byCode.map((row) => row.classroom.code)).toContain(`EC-${uniq}`);
+
+    // By grade name: the term matches the grade, not the class's own columns, which is
+    // the whole point of searching the join.
+    const byGrade = await listClassroomsWithTeachersForContext(context, { search: "پایه ویرایش دو" });
+    expect(byGrade.length).toBeGreaterThan(0);
+    expect(byGrade.every((row) => row.gradeName === "پایه ویرایش دو")).toBe(true);
+
+    // A term that matches nothing yields nothing rather than the whole list.
+    expect(await listClassroomsWithTeachersForContext(context, { search: "چیزی که وجود ندارد" })).toHaveLength(0);
+  });
+
+  it("rejects teacher access to classroom edits", async () => {
+    const db = getDb();
+    const [room] = await db.select().from(classrooms).where(and(eq(classrooms.schoolId, schoolA), eq(classrooms.code, `EC-${uniq}`)));
+    await expect(updateClassroom({ headers: teacher.headers, input: {
+      classroomId: room.id, gradeId: room.gradeId, code: `HACK-${uniq}`, name: "Hacked",
+    } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(archiveClassroom({ headers: teacher.headers, input: { itemId: room.id } })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
 });

@@ -14,10 +14,12 @@ import {
   createGradeSchema,
   createSubjectSchema,
   transitionAcademicYearSchema,
+  updateClassroomSchema,
   updateSchoolConfigurationSchema,
   updateSchoolStatusSchema,
 } from "./schema";
 import {
+  archiveClassroom,
   archiveGrade,
   archiveSubject,
   createAcademicYear,
@@ -25,6 +27,7 @@ import {
   createGrade,
   createSubject,
   transitionAcademicYear,
+  updateClassroom,
   updateSchoolConfiguration,
   updateSchoolStatus,
 } from "./services";
@@ -114,4 +117,24 @@ export async function createClassroomAction(_previous: unknown, formData: FormDa
     revalidateAcademics();
     return result;
   }, "کلاس ایجاد شد.");
+}
+
+export async function updateClassroomAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const raw = formDataToObject(formData);
+    const result = await updateClassroom({ headers: await headers(), input: updateClassroomSchema.parse({ ...raw, capacity: optionalNumber(formData.get("capacity")) ?? null }) });
+    revalidateAcademics();
+    // Attendance is not revalidated: a class's name, code, or grade is not what a
+    // register is keyed on, so the pages that show a class in a list are the ones that
+    // need to be rebuilt, and nothing else changed shape.
+    return result;
+  }, "کلاس ویرایش شد.");
+}
+
+export async function archiveClassroomAction(_previous: unknown, formData: FormData): Promise<ActionResult<unknown>> {
+  return executeAction(async () => {
+    const result = await archiveClassroom({ headers: await headers(), input: archiveCatalogItemSchema.parse(formDataToObject(formData)) });
+    revalidateAcademics();
+    return result;
+  }, "کلاس بایگانی شد.");
 }

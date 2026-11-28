@@ -1,10 +1,10 @@
 import "server-only";
 
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, ilike, inArray, or } from "drizzle-orm";
 
 import { requireSchoolAccess, requireSchoolRole, type ActiveSchoolMembership } from "@/lib/auth/authorization";
 import { getDb } from "@/lib/db";
-import { academicYears, classrooms, grades, schoolSettings, subjects, timetableEntries, users, schoolMemberships } from "@/lib/db/schema";
+import { academicYears, classrooms, enrollments, grades, schoolSettings, subjects, timetableEntries, users, schoolMemberships } from "@/lib/db/schema";
 
 export async function getSchoolConfiguration(options: { headers: Headers; schoolId?: string }) {
   const context = await requireSchoolAccess({ headers: options.headers, schoolId: options.schoolId });
@@ -86,20 +86,51 @@ export async function listClassroomsForContext(context: ActiveSchoolMembership, 
  * class has is one of the timetable hours inside it. A classroom with no hours is
  * therefore a class nobody teaches yet, which is exactly what the count says.
  */
-export async function listClassroomsWithTeachersForContext(context: ActiveSchoolMembership) {
+/**
+ * The school's classes, with how much of each is scheduled.
+ *
+ * `search` is one free-text term matched against three things at once — the class's
+ * name, its code, and the name and code of its grade — because someone looking for a
+ * class types "دهم" or "A" without first deciding which column that is. The match is
+ * made in SQL rather than over the returned rows: the list is the page's main content,
+ * and filtering it in the query is what keeps the payload the size of what is shown.
+ *
+ * The grade is joined rather than looked up per row so the search and the returned
+ * name both come from the same read. An archived grade is not excluded here the way
+ * the grade picker excludes it: a class filed under a grade that was retired is still
+ * a real class with a real timetable, and hiding it from the classroom list would
+ * leave the row visible nowhere.
+ */
+export async function listClassroomsWithTeachersForContext(context: ActiveSchoolMembership, options: { search?: string } = {}) {
+  const term = options.search?.trim();
+  const pattern = term ? `%${term}%` : undefined;
   const rows = await getDb().select({
     classroom: classrooms,
+    gradeName: grades.name,
+    gradeCode: grades.code,
   }).from(classrooms)
     .innerJoin(academicYears, and(
       eq(academicYears.id, classrooms.academicYearId),
       eq(academicYears.schoolId, context.schoolId),
     ))
+    .innerJoin(grades, and(
+      eq(grades.id, classrooms.gradeId),
+      eq(grades.schoolId, context.schoolId),
+    ))
     .where(and(
       eq(classrooms.schoolId, context.schoolId),
       eq(classrooms.status, "ACTIVE"),
       inArray(academicYears.status, ["DRAFT", "ACTIVE"]),
+      pattern
+        ? or(
+          ilike(classrooms.name, pattern),
+          ilike(classrooms.code, pattern),
+          ilike(grades.name, pattern),
+          ilike(grades.code, pattern),
+        )
+        : undefined,
     ))
-    .orderBy(asc(classrooms.name));
+    .orderBy(asc(grades.sortOrder), asc(classrooms.name));
 
   // Timetable hour counts come from one grouped query rather than a join, so a
   // classroom with several hours still appears once.
@@ -111,9 +142,21 @@ export async function listClassroomsWithTeachersForContext(context: ActiveSchool
     .groupBy(timetableEntries.classroomId);
   const countByClassroom = new Map(slotCounts.map((row) => [row.classroomId, Number(row.count)]));
 
+  // The enrolled headcount, for the same reason: one grouped read, and it is what the
+  // delete confirmation needs to say who would be affected.
+  const enrollmentCounts = await getDb().select({
+    classroomId: enrollments.classroomId,
+    count: count(enrollments.id),
+  }).from(enrollments)
+    .where(and(eq(enrollments.schoolId, context.schoolId), eq(enrollments.status, "ACTIVE")))
+    .groupBy(enrollments.classroomId);
+  const enrolledByClassroom = new Map(enrollmentCounts.map((row) => [row.classroomId, Number(row.count)]));
+
   return rows.map((row) => ({
     classroom: row.classroom,
+    gradeName: row.gradeName,
     timetableHourCount: countByClassroom.get(row.classroom.id) ?? 0,
+    enrolledCount: enrolledByClassroom.get(row.classroom.id) ?? 0,
   }));
 }
 

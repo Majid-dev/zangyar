@@ -21,6 +21,8 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "Attendance session could not be created.": "ایجاد جلسه‌ی حضور و غیاب انجام نشد.",
   "Attendance student is not in the effective roster.": "دانش‌آموز انتخاب‌شده در ترکیب مؤثر این کلاس نیست.",
   "Classroom is not available for teacher assignment.": "کلاس انتخاب‌شده برای تخصیص دبیر در دسترس نیست.",
+  "Classroom not found.": "کلاس پیدا نشد.",
+  "Classroom still has enrolled students.": "این کلاس دانش‌آموز ثبت‌نام‌شده دارد؛ ابتدا ثبت‌نام آن‌ها را ببندید یا کلاس را به پایه‌ی دیگری منتقل کنید.",
   "Classroom is not available in this academic year.": "این کلاس در سال تحصیلی انتخاب‌شده در دسترس نیست.",
   "Classroom is not available.": "کلاس انتخاب‌شده در دسترس نیست.",
   "Enrollment dates must fit within the academic year.": "تاریخ‌های ثبت‌نام باید داخل بازه‌ی سال تحصیلی باشد.",
