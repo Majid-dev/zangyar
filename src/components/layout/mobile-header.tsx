@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ProfileMenu } from "@/features/account/components/profile-menu";
 import type { ShellProfile } from "@/features/account/profile";
+import { BrandLockup } from "./brand";
 import { SidebarBrand, SidebarChrome } from "./app-sidebar";
 import type { NavSection } from "./nav-items";
 
@@ -42,8 +43,13 @@ export function MobileNav({ sections, schoolName, academicYearLabel, profile, ac
   return (
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-2.5 backdrop-blur lg:hidden">
-        <SidebarBrand />
-        <div className="flex items-center gap-1.5">
+        {/* The tagline is dropped here rather than wrapped: at 390px it is the widest
+            part of the lockup, and a three-line brand block pushed the account
+            control and the menu trigger past the viewport edge — which scrolled the
+            whole page sideways on every screen, not just this header. The mark and the
+            name are what identify the app at this size; the tagline is in the drawer. */}
+        <BrandLockup href="/dashboard" size={40} showTagline={false} className="min-w-0" />
+        <div className="flex shrink-0 items-center gap-1.5">
           <ProfileMenu profile={profile} variant="sheet" />
           <button
             ref={triggerRef}

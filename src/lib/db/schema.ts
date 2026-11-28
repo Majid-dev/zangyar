@@ -729,11 +729,30 @@ export const attendanceRecords = pgTable("attendance_records", {
   classroomId: uuid("classroom_id").notNull(),
   status: attendanceStatus("status").notNull(),
   note: text("note"),
+  // Who recorded this status *first*. A later correction does not overwrite it,
+  // because "who took the register" and "who last touched it" are different facts
+  // and only the first survives if one column carries both: an admin correcting a
+  // teacher's register would erase the evidence that the teacher ever submitted it.
   recordedByMembershipId: uuid("recorded_by_membership_id").notNull(),
+  // Set the first time a School Admin changes an already-recorded status, and never
+  // cleared. The tag the interface shows is derived from `adminEditedAt` being
+  // non-null, so "was this ever touched by an administrator" stays true across any
+  // number of further edits — by the admin again or by the teacher inside their
+  // window — which is what makes the indicator honest rather than a record of the
+  // last keystroke. Null means no administrator has ever modified it.
+  adminEditedAt: timestamp("admin_edited_at", { withTimezone: true, mode: "date" }),
+  adminEditedByMembershipId: uuid("admin_edited_by_membership_id"),
   ...timestamps,
 }, (table) => [
   unique("attendance_records_school_id_unique").on(table.schoolId, table.id),
   unique("attendance_records_session_enrollment_unique").on(table.schoolId, table.attendanceSessionId, table.enrollmentId),
+  // Both admin-edit columns are present together or absent together: a timestamp
+  // with no administrator, or an administrator with no timestamp, would be a half
+  // answer to the one question the pair exists to answer.
+  check("attendance_records_admin_edit_pair_check", sql`(
+    (${table.adminEditedAt} is null and ${table.adminEditedByMembershipId} is null)
+    or (${table.adminEditedAt} is not null and ${table.adminEditedByMembershipId} is not null)
+  )`),
   foreignKey({
     columns: [table.schoolId, table.attendanceSessionId, table.classroomId],
     foreignColumns: [attendanceSessions.schoolId, attendanceSessions.id, attendanceSessions.classroomId],
@@ -748,6 +767,11 @@ export const attendanceRecords = pgTable("attendance_records", {
     columns: [table.schoolId, table.recordedByMembershipId],
     foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
     name: "attendance_records_school_recorder_membership_fk",
+  }).onDelete("restrict"),
+  foreignKey({
+    columns: [table.schoolId, table.adminEditedByMembershipId],
+    foreignColumns: [schoolMemberships.schoolId, schoolMemberships.id],
+    name: "attendance_records_school_admin_editor_membership_fk",
   }).onDelete("restrict"),
   index("attendance_records_school_session_idx").on(table.schoolId, table.attendanceSessionId),
   index("attendance_records_school_enrollment_idx").on(table.schoolId, table.enrollmentId),

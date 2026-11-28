@@ -19,6 +19,18 @@ export function AttendanceSummary({ summary }: { summary: AttendanceSummaryData 
   return (
     <Panel className="lg:col-span-7">
       <SectionHeading eyebrow={`امروز · ${summary.date}`} title="وضعیت حضور مدرسه" description={`${numberFormat.format(summary.studentCount)} دانش‌آموز در ${numberFormat.format(summary.classroomCount)} کلاس؛ ${numberFormat.format(summary.periodCount)} زنگ امروز.`} action={<StatusBadge status={summary.pendingPeriodCount > 0 ? "pending" : "active"} />} />
+      {/* The periods a teacher could take right now, and the ones whose window has
+          closed unregistered. The second is the one that costs the school a phone
+          call tomorrow, so it is stated as a task rather than folded into a count. */}
+      {summary.overduePeriodCount > 0 ? (
+        <p className="mt-4 rounded-xl border border-danger/25 bg-danger/8 p-3 text-xs leading-6 text-danger" role="status">
+          {numberFormat.format(summary.overduePeriodCount)} زنگ بدون ثبت حضور از مهلت گذشته است. برای اصلاح، همان زنگ را از صفحه حضور و غیاب باز کنید.
+        </p>
+      ) : summary.openPeriodCount > 0 ? (
+        <p className="mt-4 rounded-xl border border-success/25 bg-success/8 p-3 text-xs leading-6 text-success" role="status">
+          {numberFormat.format(summary.openPeriodCount)} زنگ همین حالا قابل ثبت حضور است.
+        </p>
+      ) : null}
       {total === 0 ? <div className="mt-6 rounded-xl bg-sage/60 p-5 text-sm leading-7 text-muted">هنوز حضور و غیابی برای امروز ثبت نشده است.</div> : <div className="mt-6 grid gap-6 sm:grid-cols-[minmax(0,1fr)_11rem] sm:items-center">
         <div>
           <div className="flex h-3 overflow-hidden rounded-full bg-sage" role="img" aria-label={`از ${numberFormat.format(total)} رکورد، ${numberFormat.format(present)} نفر حاضر هستند`}>

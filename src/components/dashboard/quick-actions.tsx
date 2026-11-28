@@ -2,10 +2,24 @@ import Link from "next/link";
 
 import { Panel, SectionHeading } from "@/components/ui/panel";
 
-export function QuickActions({ pendingPeriodCount }: { pendingPeriodCount: number }) {
+/**
+ * The next actions, drawn for whoever is looking.
+ *
+ * "Add Student" is the administrator's action and only theirs. A teacher has no
+ * students route at all — `requirePageAccess(["SCHOOL_ADMIN"])` refuses it — so the
+ * link was a shortcut to a refusal, and it sat on the one screen a teacher opens
+ * every morning. It is not hidden with a class name but left out of the list, so
+ * there is no gap, no placeholder, and nothing for a teacher to click into an error.
+ *
+ * Nothing else about student management changes here: the roster page keeps its own
+ * "افزودن دانش‌آموز" control, and the permission boundary is where it always was.
+ */
+export function QuickActions({ pendingPeriodCount, isAdmin }: { pendingPeriodCount: number; isAdmin: boolean }) {
   const actions = [
     { label: "ثبت حضور و غیاب", detail: pendingPeriodCount === 0 ? "بررسی وضعیت امروز" : `${pendingPeriodCount} زنگ منتظر ثبت`, href: "/attendance", variant: "primary" as const },
-    { label: "افزودن دانش‌آموز", detail: "ثبت یک دانش‌آموز جدید", href: "/students/new", variant: "secondary" as const },
+    ...(isAdmin
+      ? [{ label: "افزودن دانش‌آموز", detail: "ثبت یک دانش‌آموز جدید", href: "/students/new", variant: "secondary" as const }]
+      : []),
   ];
   return (
     <Panel>

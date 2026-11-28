@@ -151,9 +151,9 @@ A school-owned contact record associated with one or more students. A guardian m
 
 ### Daily attendance
 
-1. Teacher or School Admin opens one of the day's periods.
+1. Teacher or School Admin opens the attendance page, which lists the day's periods for the classes they may access, each with its status: not yet begun, open, inside its grace period, past its deadline, already registered, or closed.
 2. The system loads or creates the single session for that period and the school-local date.
-3. The operator records one status per currently enrolled student.
+3. The operator records one status per currently enrolled student, starting from any statuses already recorded.
 4. The transaction stores attendance and eligible notification outbox entries together.
 5. A separate process sends SMS and records provider results.
 6. Authorized corrections create audit events.
@@ -181,6 +181,7 @@ A school-owned contact record associated with one or more students. A guardian m
 10. Attendance records reference valid enrollments from the same school and classroom and must fall within the enrollment's effective period.
 11. School Admins configure attendance notification triggers from the admin panel.
 12. Attendance submission never waits for SMS delivery.
+13. A teacher may submit a period's attendance only between the period's start and the end of its configured grace period, and only for a period the week's rotation names them for; a School Admin may correct any school date and is not held to that window, but a closed session refuses everyone.
 13. Only eligible guardians with a valid normalized mobile number receive notifications; a normalized mobile number is unique within a school.
 14. Outbox processing is retryable and idempotent.
 15. Business dates use the school's timezone; stored timestamps are timezone-aware.

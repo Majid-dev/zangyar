@@ -83,6 +83,7 @@ const DOMAIN_MESSAGES: Record<string, string> = {
   "Teacher registration not found.": "ثبت‌نام دبیر پیدا نشد.",
   "Teacher profile not found.": "پرونده‌ی دبیر پیدا نشد.",
   "Training or configuration data is invalid.": "اطلاعات واردشده معتبر نیست.",
+  "Teachers cannot record attendance for a future date.": "دبیران فقط می‌توانند حضور و غیاب امروز را ثبت کنند.",
   // Account settings
   "The current password is incorrect.": "گذرواژه‌ی فعلی درست نیست.",
   "This account has no password credential.": "این حساب گذرواژه ندارد؛ برای تعیین گذرواژه با مدیر مدرسه تماس بگیرید.",
@@ -109,6 +110,31 @@ function otpThrottleMessage(raw: string) {
 }
 
 /**
+ * Whether a message is already the operator's sentence.
+ *
+ * Two conventions meet here. Services that speak about records which exist only
+ * inside this application raise English messages and let this module translate
+ * them, so one place decides the wording. The scheduling and attendance services —
+ * where a refusal is about the admin's own timetable, bell times, and operating
+ * week — write the sentence directly, because a message like "the school does not
+ * operate on this day" is a statement about this school's configuration and
+ * translating it through an English key would be a longer route to the same words,
+ * with a second place for the two to disagree.
+ *
+ * Those already-Persian messages are passed through rather than collapsed to the
+ * generic failure: the alternative is a refusal the operator cannot act on, which
+ * is exactly what these sentences exist to prevent. A message that has been
+ * *translated* is safe to show because it was written for a reader, and an
+ * untranslated internal one still falls through to the generic sentence below —
+ * so this widens what is legible without widening what leaks.
+ */
+function isOperatorMessage(raw: string) {
+  // Arabic and Persian both live in the Arabic script block; either is enough to
+  // say the sender wrote this for a person rather than for a log.
+  return /[؀-ۿ]/.test(raw);
+}
+
+/**
  * Returns a safe Persian message. Unknown failures deliberately collapse to a
  * generic sentence; the original is logged server-side by the caller.
  */
@@ -123,6 +149,9 @@ export function toUserMessage(error: unknown): { message: string; known: boolean
 
   const throttle = otpThrottleMessage(error.message);
   if (throttle) return { message: throttle, known: true };
+
+  const message = error.message.trim();
+  if (isOperatorMessage(message)) return { message, known: true };
 
   return { message: "انجام این عملیات ممکن نشد. لطفاً دوباره تلاش کنید.", known: false };
 }
